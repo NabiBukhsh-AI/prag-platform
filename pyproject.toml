@@ -108,6 +108,9 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
     "TC001",
     "TC003",
 ]
+# Tests are not import-time sensitive, and routing fixture and helper types through
+# TYPE_CHECKING blocks costs more readability than the deferred import saves.
+"tests/**/*.py" = ["TC001", "TC003"]
 # The hierarchy uses the Error suffix for category bases (RetrievalError, GenerationError) and a
 # descriptive condition name for the concrete failures under them. "except IsolationViolation"
 # and "raise DeadlineExceeded" read as what happened; appending Error to each would not.

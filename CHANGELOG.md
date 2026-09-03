@@ -11,6 +11,11 @@ versions. Their compatibility rules are specified separately.
 ## [Unreleased]
 
 ### Added
+- `core`: 24 protocols, 112 domain models, the typed error hierarchy, the budget controller
+  with its six-rung degradation ladder, monotonic deadlines, and the DI container.
+- Conformance suites for `KnowledgeSource`, `LLMProvider`, `EmbeddingProvider`, `MemoryStore`
+  and `CacheTier`, parameterized over every registered implementation, plus in-memory fakes
+  that actually enforce their contracts rather than mocking them.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports
