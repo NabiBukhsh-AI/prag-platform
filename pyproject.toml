@@ -1,0 +1,147 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prag"
+version = "0.1.0"
+description = "Parametric RAG platform: composes weight-resident, adapter-retrieved, and text-retrieved knowledge behind a deterministic typed state graph."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Nabi Baloch", email = "nabibuksh.baloch01@gmail.com" }]
+maintainers = [{ name = "Nabi Baloch", email = "nabibuksh.baloch01@gmail.com" }]
+keywords = [
+    "parametric-rag",
+    "rag",
+    "retrieval-augmented-generation",
+    "lora",
+    "peft",
+    "llm",
+    "llmops",
+    "vector-search",
+    "hybrid-retrieval",
+    "reranking",
+    "knowledge-fusion",
+    "grounding",
+    "hallucination-detection",
+    "multi-tenant",
+    "observability",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+]
+
+[project.optional-dependencies]
+# Phase 1 runtime. Kept out of the base install so `core` stays importable
+# with nothing but pydantic, which is what makes unit tests fast.
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+]
+storage = [
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "redis>=5.0",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "mypy>=1.11",
+    "ruff>=0.6",
+    "import-linter>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/NabiBukhsh-AI/prag-platform"
+Repository = "https://github.com/NabiBukhsh-AI/prag-platform"
+Issues = "https://github.com/NabiBukhsh-AI/prag-platform/issues"
+Changelog = "https://github.com/NabiBukhsh-AI/prag-platform/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prag"]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "PT", "SIM", "TCH", "RUF"]
+ignore = [
+    "B008",  # FastAPI's Depends() in defaults is idiomatic.
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves annotations at runtime to build its validators, so moving a model's field
+# types into a TYPE_CHECKING block breaks the model rather than tidying it.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
+[tool.ruff.lint.per-file-ignores]
+# Protocol definitions are intentionally bodyless and shadow no builtins.
+"src/prag/core/protocols/*.py" = [
+    "A002",
+    # The contract suite reflects over protocol signatures with typing.get_type_hints() to
+    # generate its conformance cases, which needs these names resolvable at runtime.
+    "TC001",
+    "TC003",
+]
+# The hierarchy uses the Error suffix for category bases (RetrievalError, GenerationError) and a
+# descriptive condition name for the concrete failures under them. "except IsolationViolation"
+# and "raise DeadlineExceeded" read as what happened; appending Error to each would not.
+"src/prag/core/errors.py" = ["N818"]
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_generics = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# Protocol bodies are ellipses by design.
+module = "prag.core.protocols.*"
+disallow_untyped_defs = true
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+markers = [
+    "contract: conformance suite, parameterized over every protocol implementation",
+    "integration: requires docker compose services",
+    "e2e: full graph against the seeded corpus",
+    "adversarial: injection, poisoning, ACL probes; blocking in CI",
+]
+
+[tool.coverage.run]
+source = ["src/prag"]
+branch = true

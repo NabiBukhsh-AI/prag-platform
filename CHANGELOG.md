@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versioning follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Note that the platform versions four things independently of this package version: the
+configuration contract, the response envelope schema, adapter versions, and embedding index
+versions. Their compatibility rules are specified separately.
+
+## [Unreleased]
+
+### Added
+- Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
+  development, test, and evaluation loops.
+- `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports
+  nothing internal, `storage` holds no business logic, `orchestration` sees protocols and never
+  implementations, nothing imports `api`, and the parametric and retrieval tiers stay mutually
+  independent so the parametric tier remains disableable.

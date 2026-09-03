@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# Sensitive material — belongs in prag-platform_files (private), never here.
+# This block is a guard, not a convenience. Do not relax it.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+config/tenants/          # per-tenant overrides, §25
+eval/golden/
+eval/regression/
+eval/adversarial/
+eval/canaries/           # per-tenant canary strings, §20.2
+corpora/
+adapters/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.tox/
+
+# ---------------------------------------------------------------------------
+# Local stack / runtime artifacts
+# ---------------------------------------------------------------------------
+.docker-data/
+*.log
+*.sqlite
+*.sqlite3
+.local/
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/

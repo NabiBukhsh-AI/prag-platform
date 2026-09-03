@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "prag-platform: a Parametric RAG platform"
+message: "If you reference this work, please cite it as below."
+type: software
+authors:
+  - given-names: Nabi
+    family-names: Baloch
+    email: nabibuksh.baloch01@gmail.com
+repository-code: "https://github.com/NabiBukhsh-AI/prag-platform"
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-09-03"
+abstract: >-
+  A platform that answers queries by composing three classes of knowledge and routing between
+  them per query: knowledge already encoded in a model's weights, knowledge injected into
+  weights at inference time as retrieved low-rank parameter deltas, and knowledge injected into
+  the context window as retrieved text. Parametric knowledge is treated as a tiered, retrievable
+  store rather than a static fine-tune, and is gated by an eligibility function because
+  parameters are uncitable, unrevocable, and unfilterable per request. The request path is a
+  deterministic typed state graph rather than an agent loop.
+keywords:
+  - parametric RAG
+  - retrieval-augmented generation
+  - low-rank adaptation
+  - knowledge fusion
+  - grounding
+  - multi-tenancy
