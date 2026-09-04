@@ -49,13 +49,39 @@ Five decisions carry the design:
 
 ## Status
 
-Early. Following the build order in the specification: `core/` first and in full, then the
-contract suites, then storage with in-memory fakes, then the graph engine, then Phase 1
-vertical slices one node at a time.
+Phase 1 in progress. The build order is followed strictly: `core/` first and in full, then the
+contract suites, then storage with in-memory fakes, then the graph engine, then vertical slices
+one at a time.
+
+**360 tests passing**, ruff clean, dependency contracts enforced.
+
+### Foundations — complete
+
+| Component | What it holds |
+|---|---|
+| `core/` | 24 protocols, 128 domain models, typed errors, the budget ladder, monotonic deadlines, DI container |
+| `tests/contract/` | Conformance suites for 7 protocols, parameterized over every registered implementation |
+| `storage/` | Knowledge registry, 4 repositories, in-memory vector store with a vendor-neutral filter dialect |
+| `orchestration/graph` | Serializable graph definitions with load-time validation, plus the interpreter |
+| `config/` | Full settings contract, cross-section validation, four-layer loading, tenant allow-list |
+
+### Phase 1 slices
+
+| Slice | State |
+|---|---|
+| Ingestion: Document IR, normalization, chunking, indexing | done |
+| Retrieval: vector `KnowledgeSource` with parent-child and ACL filtering | done |
+| Context builder with region budgeting | next |
+| `LLMProvider` and citation binding | not started |
+| `standard_answer` graph definition | not started |
+| FastAPI layer, middleware, SSE | not started |
+| `docker-compose.yml` and the seed script | not started |
+| Minimal OpenTelemetry | not started |
+
+### Later phases
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Grounded RAG core: protocols, models, graph engine, pgvector, ingestion, citations | in progress |
 | 2 | Query intelligence, retrieval orchestration, caching, budget ladder | not started |
 | 3 | Evaluation, guardrails, observability | not started |
 | 4 | Parametric tier | not started |
@@ -134,6 +160,27 @@ cloud dependencies.
 Deliberately absent: a generic "AI engine" facade, an agent that decides which retriever to
 call, an LLM call on the pre-generation critical path, a `utils/` package, and classes named
 `Manager`, `Handler`, or `Processor`.
+
+## How retrieval is shaped
+
+**Parent-child is the default, everywhere.** The child chunk is embedded and matched, because a
+300-token paragraph about one thing embeds far more precisely than a 2000-token section about
+six. The parent is what reaches the model, because the paragraph that matched usually cannot
+answer on its own. Neither side compromises for the other, and no global chunk size needs tuning.
+
+**Chunking strategy is a deterministic decision function**, never a model call. Ingestion is
+idempotent and keyed on a content hash, so re-running is free — a property a nondeterministic
+step would destroy. Document type is treated as a *claim* the selector re-checks against
+structural reality, because extraction reports headings that are not there often enough to
+matter.
+
+**ACL filtering happens at the index, not after it.** Filtering downstream means fetching rows
+the caller may not see, and fetched data can leak through a log line, a cache entry, or a timing
+difference even when it never reaches the response.
+
+**Running out of time is not a source failing.** A deadline breach returns a partial result;
+wrapping it as an unavailable source would open the circuit breaker on a healthy backend and
+turn one slow query into an outage.
 
 ## Documentation
 

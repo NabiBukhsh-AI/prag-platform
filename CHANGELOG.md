@@ -26,6 +26,10 @@ versions. Their compatibility rules are specified separately.
 - `ingestion`: the canonical Document IR, Markdown/HTML/text normalization, deterministic
   document typing and strategy selection, structure-aware and recursive chunkers with
   parent-child output, and chunk validation that reports a per-source rejection rate.
+- `storage.vectorstore`: a vendor-neutral filter dialect and an exact-search in-memory
+  `VectorStore`, with its own conformance suite.
+- `retrieval`: a vector `KnowledgeSource` doing parent-child retrieval with index-side ACL
+  filtering, plus `ingestion.indexing` to close the ingest-to-retrieve loop.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports

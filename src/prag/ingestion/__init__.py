@@ -13,6 +13,7 @@ from prag.ingestion.chunking import (
     select_strategy,
     validate_chunks,
 )
+from prag.ingestion.indexing import build_payload, index_chunks
 from prag.ingestion.normalize import (
     classify_document_type,
     content_hash,
@@ -25,9 +26,11 @@ __all__ = [
     "ChunkerRegistry",
     "RecursiveCharacterChunker",
     "StructureAwareChunker",
+    "build_payload",
     "classify_document_type",
     "content_hash",
     "default_registry",
+    "index_chunks",
     "normalize_html",
     "normalize_markdown",
     "normalize_text",

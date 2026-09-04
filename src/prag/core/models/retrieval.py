@@ -102,7 +102,14 @@ class RetrievalLeg(BaseModel):
 
     leg_id: str
     source_id: str
+    #: Which variant this leg queries with. Recorded for tracing and for measuring whether a
+    #: transform earns its budget: "rewriting helped" is only checkable if the trace says which
+    #: legs used the rewrite.
     query_variant: Literal["raw", "rewritten", "expanded", "entities_only", "sub_query"]
+    #: The resolved text to query with. Carried on the leg rather than looked up by the source,
+    #: because variant resolution is the planner's job and a source that resolved its own text
+    #: would need to know about transforms it has no business knowing about.
+    query_text: str = ""
     sub_query_id: str | None = None
     top_k: int = Field(gt=0)
     embedding_model: str | None = None

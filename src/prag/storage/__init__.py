@@ -15,10 +15,13 @@ from prag.storage.repositories.in_memory import (
     InMemoryKnowledgeRepository,
     InMemoryLineageRepository,
 )
+from prag.storage.vectorstore import InMemoryVectorStore, acl_filter
 
 __all__ = [
     "InMemoryAdapterRepository",
     "InMemoryEvalRepository",
     "InMemoryKnowledgeRepository",
     "InMemoryLineageRepository",
+    "InMemoryVectorStore",
+    "acl_filter",
 ]
