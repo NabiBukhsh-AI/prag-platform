@@ -75,6 +75,18 @@ from prag.core.models.guardrails import (
     VerdictAction,
 )
 from prag.core.models.identity import Budget, Principal, TenantPolicy, UtilityWeights
+from prag.core.models.knowledge import (
+    AccessPolicy,
+    AclMode,
+    Authority,
+    IndexHealth,
+    IndexingProfile,
+    LineageEdge,
+    SourceRecord,
+    SourceTemporality,
+    SourceType,
+    StalenessState,
+)
 from prag.core.models.memory import MemoryItem, MemorySelector, SessionSummary
 from prag.core.models.parametric import (
     AdapterRecord,
@@ -132,6 +144,8 @@ from prag.core.models.state import NodeResult, NodeStatus, RequestState
 __all__ = [
     "Abstention",
     "AbstentionCode",
+    "AccessPolicy",
+    "AclMode",
     "AdapterRecord",
     "AdapterRef",
     "AdapterSet",
@@ -139,6 +153,7 @@ __all__ = [
     "AdapterTier",
     "Ambiguity",
     "AnswerEnvelope",
+    "Authority",
     "Budget",
     "BudgetClass",
     "CacheEntry",
@@ -186,6 +201,8 @@ __all__ = [
     "GuardrailVerdict",
     "HealthState",
     "HealthStatus",
+    "IndexHealth",
+    "IndexingProfile",
     "KnowledgeBasis",
     "KnowledgeClass",
     "KnowledgeDecision",
@@ -193,6 +210,7 @@ __all__ = [
     "KnowledgeRequirement",
     "LegResult",
     "LegStatus",
+    "LineageEdge",
     "LoadedAdapter",
     "MemoryItem",
     "MemoryNamespace",
@@ -228,6 +246,10 @@ __all__ = [
     "SlaTier",
     "SourceCapabilities",
     "SourceHint",
+    "SourceRecord",
+    "SourceTemporality",
+    "SourceType",
+    "StalenessState",
     "StalenessWarning",
     "Stance",
     "Strategy",

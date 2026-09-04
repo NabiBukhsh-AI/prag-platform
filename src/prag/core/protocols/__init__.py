@@ -46,8 +46,15 @@ from prag.core.protocols.retrieval import (
     RetrievalOrchestrator,
     VectorStore,
 )
+from prag.core.protocols.storage import (
+    AdapterRepository,
+    EvalRepository,
+    KnowledgeRepository,
+    LineageRepository,
+)
 
 __all__ = [
+    "AdapterRepository",
     "AdapterSelector",
     "AdapterStore",
     "CacheTier",
@@ -55,14 +62,17 @@ __all__ = [
     "ContextBuilder",
     "ContextValidator",
     "EmbeddingProvider",
+    "EvalRepository",
     "Evaluator",
     "FusionPolicy",
     "GraphNode",
     "GroundingVerifier",
     "Guardrail",
+    "KnowledgeRepository",
     "KnowledgeSource",
     "LLMProvider",
     "LexicalStore",
+    "LineageRepository",
     "MemoryStore",
     "ModelRouter",
     "ParametricEligibilityGate",
