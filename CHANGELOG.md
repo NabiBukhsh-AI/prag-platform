@@ -23,6 +23,9 @@ versions. Their compatibility rules are specified separately.
   what the request has left, and checks every node's reads/writes declarations.
 - `config`: the full Pydantic Settings contract with documented defaults, cross-section
   validation, four-layer loading, and an explicit tenant override allow-list.
+- `ingestion`: the canonical Document IR, Markdown/HTML/text normalization, deterministic
+  document typing and strategy selection, structure-aware and recursive chunkers with
+  parent-child output, and chunk validation that reports a per-source rejection rate.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports

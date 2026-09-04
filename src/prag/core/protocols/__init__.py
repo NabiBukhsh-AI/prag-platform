@@ -30,6 +30,7 @@ from prag.core.protocols.evidence import (
 )
 from prag.core.protocols.fusion import ConfidenceCalibrator, FusionPolicy
 from prag.core.protocols.generation import GroundingVerifier, LLMProvider, ModelRouter
+from prag.core.protocols.ingestion import Chunker, Extractor, TokenCounter
 from prag.core.protocols.intelligence import (
     QueryAnalyzer,
     QueryTransformer,
@@ -58,12 +59,14 @@ __all__ = [
     "AdapterSelector",
     "AdapterStore",
     "CacheTier",
+    "Chunker",
     "ConfidenceCalibrator",
     "ContextBuilder",
     "ContextValidator",
     "EmbeddingProvider",
     "EvalRepository",
     "Evaluator",
+    "Extractor",
     "FusionPolicy",
     "GraphNode",
     "GroundingVerifier",
@@ -81,5 +84,6 @@ __all__ = [
     "Reranker",
     "RetrievalOrchestrator",
     "StrategyRouter",
+    "TokenCounter",
     "VectorStore",
 ]
