@@ -21,6 +21,8 @@ versions. Their compatibility rules are specified separately.
 - `orchestration.graph`: a serializable graph definition with load-time structural validation,
   and an interpreter that enforces the budget between nodes, derives each node's deadline from
   what the request has left, and checks every node's reads/writes declarations.
+- `config`: the full Pydantic Settings contract with documented defaults, cross-section
+  validation, four-layer loading, and an explicit tenant override allow-list.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports
