@@ -16,6 +16,11 @@ versions. Their compatibility rules are specified separately.
 - Conformance suites for `KnowledgeSource`, `LLMProvider`, `EmbeddingProvider`, `MemoryStore`
   and `CacheTier`, parameterized over every registered implementation, plus in-memory fakes
   that actually enforce their contracts rather than mocking them.
+- `storage`: knowledge registry models, four repository protocols, in-memory implementations,
+  and a conformance suite per repository.
+- `orchestration.graph`: a serializable graph definition with load-time structural validation,
+  and an interpreter that enforces the budget between nodes, derives each node's deadline from
+  what the request has left, and checks every node's reads/writes declarations.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports
