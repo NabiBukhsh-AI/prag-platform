@@ -26,6 +26,8 @@ from prag.core.protocols.evidence import (
     ContextBuilder,
     ContextValidator,
     EmbeddingProvider,
+    EvidenceGrouper,
+    PromptRenderer,
     Reranker,
 )
 from prag.core.protocols.fusion import ConfidenceCalibrator, FusionPolicy
@@ -66,6 +68,7 @@ __all__ = [
     "EmbeddingProvider",
     "EvalRepository",
     "Evaluator",
+    "EvidenceGrouper",
     "Extractor",
     "FusionPolicy",
     "GraphNode",
@@ -79,6 +82,7 @@ __all__ = [
     "MemoryStore",
     "ModelRouter",
     "ParametricEligibilityGate",
+    "PromptRenderer",
     "QueryAnalyzer",
     "QueryTransformer",
     "Reranker",

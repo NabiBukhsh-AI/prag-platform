@@ -50,6 +50,8 @@ __all__ = [
 #: A citation marker as rendered into the evidence region: ``[E3]``.
 _MARKER = re.compile(r"\[(E\d+)\]")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
+#: One or more citation markers at the head of a fragment, left there by sentence splitting.
+_LEADING_MARKERS = re.compile(r"^\s*(?:\[E\d+\]\s*)+")
 _WORD = re.compile(r"[a-z0-9][a-z0-9\-_.%/]*")
 
 #: Tokens that carry no evidential weight. Kept minimal: in a technical corpus, "not", "before"
@@ -118,21 +120,40 @@ def extract_claims(answer: str) -> tuple[Claim, ...]:
     claims: list[Claim] = []
     offset = 0
 
-    for sentence in _SENTENCE.split(answer):
-        if not sentence.strip():
-            offset += len(sentence) + 1
+    for raw in _SENTENCE.split(answer):
+        if not raw.strip():
+            offset += len(raw) + 1
             continue
 
-        start = answer.find(sentence, offset)
+        start = answer.find(raw, offset)
         start = offset if start < 0 else start
+        offset = start + len(raw)
+
+        # A citation is written after the sentence it supports — "…within 15 minutes. [E1]" —
+        # so sentence splitting strands the marker at the head of the *next* sentence. Left
+        # uncorrected, every claim is checked against the evidence for the claim before it, and
+        # the verifier then strips citations that were correct all along.
+        leading = _LEADING_MARKERS.match(raw)
+        if leading and claims:
+            trailing = cited_markers(leading.group(0))
+            previous = claims[-1]
+            claims[-1] = Claim(
+                text=f"{previous.text} {leading.group(0).strip()}".strip(),
+                claimed_markers=tuple(dict.fromkeys(previous.claimed_markers + trailing)),
+                span=(previous.span[0], start + leading.end()),
+            )
+            raw = raw[leading.end() :]
+            start += leading.end()
+            if not raw.strip():
+                continue
+
         claims.append(
             Claim(
-                text=sentence.strip(),
-                claimed_markers=cited_markers(sentence),
-                span=(start, start + len(sentence)),
+                text=raw.strip(),
+                claimed_markers=cited_markers(raw),
+                span=(start, start + len(raw)),
             )
         )
-        offset = start + len(sentence)
 
     return tuple(claims)
 

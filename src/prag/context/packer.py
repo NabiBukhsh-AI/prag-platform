@@ -59,6 +59,21 @@ def query_aspects(query: str) -> frozenset[str]:
     )
 
 
+def _token_overlap(left: str, right: str) -> float:
+    """Jaccard overlap of content-token sets.
+
+    The same formula the dedup stage uses, deliberately not shared with it. ``context`` may not
+    import ``evidence`` — the two answer different questions (is this a near-duplicate, versus
+    how much does this add to what is already selected) and will diverge as each is tuned.
+    Reaching across the boundary to save nine lines would couple two independent decisions.
+    """
+    left_tokens = frozenset(_WORD.findall(left.lower())) - _STOPWORDS
+    right_tokens = frozenset(_WORD.findall(right.lower())) - _STOPWORDS
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
 def _covered_aspects(text: str, aspects: frozenset[str]) -> frozenset[str]:
     lowered = text.lower()
     return frozenset(aspect for aspect in aspects if aspect in lowered)
@@ -74,10 +89,8 @@ def _redundancy(group: EvidenceGroup, selected: Sequence[EvidenceGroup]) -> floa
     if not selected:
         return 0.0
 
-    from prag.evidence.dedup import token_overlap
-
     return max(
-        token_overlap(group.representative.text, other.representative.text) for other in selected
+        _token_overlap(group.representative.text, other.representative.text) for other in selected
     )
 
 

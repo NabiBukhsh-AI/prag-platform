@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from prag.core.errors import AbstentionRequired, RetrievalTotalFailure
 from prag.core.ids import new_plan_id
+from prag.core.models.context import CoverageWarning
 from prag.core.models.fusion import (
     Abstention,
     AbstentionCode,
@@ -37,13 +38,11 @@ from prag.core.models.retrieval import (
     RetrievalPlan,
 )
 from prag.core.models.state import NodeResult, NodeStatus
-from prag.evidence import group_candidates
 
 if TYPE_CHECKING:
-    from prag.context.builder import RegionContextBuilder
     from prag.core.models.context import RenderedRegion
     from prag.core.models.state import RequestState
-    from prag.core.protocols.evidence import ContextBuilder
+    from prag.core.protocols.evidence import ContextBuilder, EvidenceGrouper, PromptRenderer
     from prag.core.protocols.generation import GroundingVerifier, LLMProvider, ModelRouter
     from prag.core.protocols.retrieval import KnowledgeSource
 
@@ -141,8 +140,13 @@ class RetrieveNode:
     timeout_ms = 2_000
     fallback_node = None
 
-    def __init__(self, source: KnowledgeSource, *, top_k: int = 8) -> None:
+    def __init__(
+        self, source: KnowledgeSource, grouper: EvidenceGrouper, *, top_k: int = 8
+    ) -> None:
         self._source = source
+        # Injected rather than imported. A node that imports the evidence subsystem cannot be
+        # tested without it, and the subsystem can never move out of process.
+        self._grouper = grouper
         self._top_k = top_k
 
     async def run(self, state: RequestState) -> NodeResult:
@@ -181,7 +185,9 @@ class RetrieveNode:
         return NodeResult(
             node_id=self.node_id,
             status=NodeStatus.OK,
-            state=state.advanced(plan=plan, pool=pool, evidence=group_candidates(pool.candidates)),
+            state=state.advanced(
+                plan=plan, pool=pool, evidence=tuple(self._grouper.group(pool.candidates))
+            ),
         )
 
 
@@ -194,11 +200,7 @@ class BuildContextNode:
     timeout_ms = 500
     fallback_node = None
 
-    def __init__(
-        self,
-        builder: ContextBuilder | RegionContextBuilder,
-        router: ModelRouter,
-    ) -> None:
+    def __init__(self, builder: ContextBuilder, router: ModelRouter) -> None:
         self._builder = builder
         self._router = router
 
@@ -268,25 +270,29 @@ class GenerateNode:
         self,
         provider: LLMProvider,
         verifier: GroundingVerifier,
+        renderer: PromptRenderer,
         *,
         system_prompt: str,
     ) -> None:
         self._provider = provider
         self._verifier = verifier
+        # The renderer decides which regions carry instruction authority. Injecting it keeps
+        # that decision swappable and testable rather than welded into a node.
+        self._renderer = renderer
         self._system_prompt = system_prompt
 
     async def run(self, state: RequestState) -> NodeResult:
-        from prag.context.renderer import render_regions
-
         assert state.bundle is not None
         assert state.spec is not None
         assert state.analysis is not None
 
-        regions: tuple[RenderedRegion, ...] = render_regions(
-            system=self._system_prompt,
-            query=state.analysis.normalized_query,
-            evidence=state.bundle.evidence,
-            memory=state.bundle.memory_items,
+        regions: tuple[RenderedRegion, ...] = tuple(
+            self._renderer.render(
+                system=self._system_prompt,
+                query=state.analysis.normalized_query,
+                evidence=state.bundle.evidence,
+                memory=state.bundle.memory_items,
+            )
         )
         request = GenerationRequest(
             request_id=state.request_id, spec=state.spec, regions=regions, stream=False
@@ -361,8 +367,6 @@ def _envelope(state, *, generated, grounding, bundle) -> AnswerEnvelope:
     words and the numbers cannot disagree — a model left to hedge on its own will say "I am
     fairly confident" beside a score of 0.31.
     """
-    from prag.core.models.context import CoverageWarning
-
     groundedness = grounding.groundedness
     band = (
         ConfidenceBand.HIGH

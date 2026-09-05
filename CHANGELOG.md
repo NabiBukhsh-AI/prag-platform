@@ -35,6 +35,14 @@ versions. Their compatibility rules are specified separately.
 - `context`: region allocation with a hard evidence cap, value-density packing with redundancy
   and coverage corrections, four ordering modes, and a renderer where the evidence region
   carries no instruction authority.
+- `generation`: profiles, policy model routing, a local extractive provider, sentence-buffered
+  streaming with corrections, and grounding that binds citations only after entailment.
+- `orchestration.nodes` and the `standard_answer` graph, with an abstention path.
+- `api`: composition root, identity resolution, one-place error mapping, SSE protocol, and a
+  FastAPI app exposing `/health`, `/v1/answer` and `/v1/ingest`.
+- `observability`: span attribute schema with enforced redaction.
+- Local stack: `docker-compose.yml`, `Dockerfile`, and a seed script that proves a query answers
+  end to end.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports

@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from prag.context import RegionContextBuilder
+from prag.context import RegionContextBuilder, RegionPromptRenderer
 from prag.core.errors import AbstentionRequired
 from prag.core.ids import new_request_id, new_trace_id
 from prag.core.models.common import Deadline
 from prag.core.models.identity import Budget, Principal, TenantPolicy, UtilityWeights
 from prag.core.models.state import RequestState
+from prag.evidence import CandidateGrouper
 from prag.generation import (
     HeuristicGroundingVerifier,
     LocalExtractiveProvider,
@@ -124,7 +125,7 @@ async def build_engine(
         standard_answer_graph(),
         {
             "analyze": AnalyzeNode(),
-            "retrieve": RetrieveNode(source),
+            "retrieve": RetrieveNode(source, CandidateGrouper()),
             "build_context": BuildContextNode(
                 RegionContextBuilder(system_prompt=SYSTEM_PROMPT, max_evidence_tokens=4_000),
                 router,
@@ -132,6 +133,7 @@ async def build_engine(
             "generate": GenerateNode(
                 LocalExtractiveProvider(),
                 HeuristicGroundingVerifier(entailment_threshold=0.5),
+                RegionPromptRenderer(),
                 system_prompt=SYSTEM_PROMPT,
             ),
             "abstain": AbstainNode(),

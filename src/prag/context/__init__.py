@@ -33,3 +33,46 @@ __all__ = [
     "render_regions",
     "rendered_text",
 ]
+
+
+class RegionPromptRenderer:
+    """The ``PromptRenderer`` implementation, as an injectable object.
+
+    Wraps ``render_regions`` so orchestration depends on the protocol. The rule it enforces —
+    that the evidence region never carries instruction authority — lives in the function, and
+    this class exists only so that rule can be swapped and asserted independently of the graph.
+    """
+
+    def render(
+        self,
+        *,
+        system: str,
+        query: str,
+        evidence=(),
+        memory=(),
+        epistemic_marking: str | None = None,
+    ):
+        return render_regions(
+            system=system,
+            query=query,
+            evidence=evidence,
+            memory=memory,
+            epistemic_marking=epistemic_marking,
+        )
+
+
+__all__ = [
+    "EVIDENCE_PREAMBLE",
+    "PackedEvidence",
+    "RegionAllocation",
+    "RegionContextBuilder",
+    "RegionPromptRenderer",
+    "allocate_regions",
+    "order_groups",
+    "pack_evidence",
+    "query_aspects",
+    "render_evidence",
+    "render_memory",
+    "render_regions",
+    "rendered_text",
+]

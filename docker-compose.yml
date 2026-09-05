@@ -1,0 +1,72 @@
+# The local stack.
+#
+# `docker compose up` plus `make seed` yields a working system with no cloud dependency, no API
+# key, and no model download. That is a design goal rather than a convenience: a platform that
+# can only be exercised against production infrastructure cannot be developed against, and every
+# change to it becomes a deploy-and-hope.
+#
+# Phase 1 runs the API alone, because its storage is in-process. Postgres, Redis, Qdrant and
+# OpenSearch are declared here behind profiles so the topology is visible and reviewable, and so
+# that enabling one is a flag rather than a rewrite. They are not started by default: a service
+# nothing connects to is a service nobody notices has been misconfigured.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PRAG_SERVER__HOST: 0.0.0.0
+      PRAG_SERVER__PORT: "8080"
+      PRAG_OBSERVABILITY__LOG_LEVEL: INFO
+    healthcheck:
+      # Checks the corpus, not just the process. An empty index answers every query with nothing,
+      # which from outside is indistinguishable from a corpus that has no match — and that
+      # ambiguity is exactly what makes a failed seed hard to notice.
+      test: ["CMD", "python", "-c", "import urllib.request,json,sys; b=json.load(urllib.request.urlopen('http://localhost:8080/health')); sys.exit(0 if b['status']=='ok' else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    profiles: ["full"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prag
+      POSTGRES_PASSWORD: prag
+      POSTGRES_DB: prag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prag"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    profiles: ["full"]
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    profiles: ["full"]
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+volumes:
+  postgres-data:
+  qdrant-data:

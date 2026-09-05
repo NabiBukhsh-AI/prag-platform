@@ -6,14 +6,21 @@ from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from prag.core.models.common import Deadline, EmbeddingPurpose
-from prag.core.models.context import ContextBundle, ContextValidation
+from prag.core.models.context import ContextBundle, ContextValidation, RenderedRegion
 from prag.core.models.generation import ModelSpec
 from prag.core.models.identity import Budget
 from prag.core.models.memory import MemoryItem
 from prag.core.models.query import QueryAnalysis
 from prag.core.models.retrieval import Candidate, EvidenceGroup
 
-__all__ = ["ContextBuilder", "ContextValidator", "EmbeddingProvider", "Reranker"]
+__all__ = [
+    "ContextBuilder",
+    "ContextValidator",
+    "EmbeddingProvider",
+    "EvidenceGrouper",
+    "PromptRenderer",
+    "Reranker",
+]
 
 
 @runtime_checkable
@@ -109,5 +116,49 @@ class ContextValidator(Protocol):
 
         Runs before generation, which is the point: the cheapest way to avoid a bad answer is
         to notice that the evidence could not support a good one before paying for the tokens.
+        """
+        ...
+
+
+@runtime_checkable
+class EvidenceGrouper(Protocol):
+    """Collapses candidates into evidence groups.
+
+    A protocol rather than a function import, so that orchestration nodes depend on the
+    capability and not on the module implementing it. That is the rule keeping the graph
+    interpretable in isolation: a node that imports ``prag.evidence`` cannot be tested without
+    it, and the subsystem can never move out of process.
+    """
+
+    def group(self, candidates: Sequence[Candidate]) -> Sequence[EvidenceGroup]:
+        """Group candidates, marking which are independent.
+
+        Near-duplicates must be *linked* rather than dropped. The link is what stops the
+        agreement signal downstream from counting one fact several times.
+        """
+        ...
+
+
+@runtime_checkable
+class PromptRenderer(Protocol):
+    """Renders context regions to text.
+
+    Injected rather than imported for the same reason as ``EvidenceGrouper``, and with a sharper
+    edge: the renderer decides which regions carry instruction authority, and that decision must
+    be swappable and testable on its own.
+    """
+
+    def render(
+        self,
+        *,
+        system: str,
+        query: str,
+        evidence: Sequence[EvidenceGroup],
+        memory: Sequence[MemoryItem],
+        epistemic_marking: str | None = None,
+    ) -> Sequence[RenderedRegion]:
+        """Assemble the regions, with authority set correctly on each.
+
+        The evidence region must never carry instruction authority, whatever the implementation.
         """
         ...

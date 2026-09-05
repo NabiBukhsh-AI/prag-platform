@@ -49,11 +49,15 @@ Five decisions carry the design:
 
 ## Status
 
-Phase 1 in progress. The build order is followed strictly: `core/` first and in full, then the
+**Phase 1 is complete.** The build order was followed strictly: `core/` first and in full, then the
 contract suites, then storage with in-memory fakes, then the graph engine, then vertical slices
 one at a time.
 
-**407 tests passing**, ruff clean, dependency contracts enforced.
+**486 tests passing**, ruff clean, and all 7 dependency contracts enforced by `import-linter`.
+
+```bash
+docker compose up -d && make seed   # a working system, no cloud dependency
+```
 
 ### Foundations — complete
 
@@ -65,19 +69,20 @@ one at a time.
 | `orchestration/graph` | Serializable graph definitions with load-time validation, plus the interpreter |
 | `config/` | Full settings contract, cross-section validation, four-layer loading, tenant allow-list |
 
-### Phase 1 slices
+### Phase 1 — complete
 
-| Slice | State |
+| Slice | What it delivers |
 |---|---|
-| Ingestion: Document IR, normalization, chunking, indexing | done |
-| Retrieval: vector `KnowledgeSource` with parent-child and ACL filtering | done |
-| Evidence grouping: near-duplicate linking and independence marking | done |
-| Context builder: region budgeting, packing, ordering, rendering | done |
-| `LLMProvider` and citation binding | next |
-| `standard_answer` graph definition | not started |
-| FastAPI layer, middleware, SSE | not started |
-| `docker-compose.yml` and the seed script | not started |
-| Minimal OpenTelemetry | not started |
+| Ingestion | Document IR, Markdown/HTML/text normalization, deterministic chunking with parent-child output, indexing |
+| Retrieval | Vector `KnowledgeSource` with index-side ACL filtering, vendor-neutral filter dialect |
+| Evidence | Near-duplicate linking and independence marking from shared lineage |
+| Context | Region budgeting, value-density packing, four ordering modes, isolated evidence region |
+| Generation | Model routing, generation profiles, local extractive provider, sentence-buffered streaming |
+| Grounding | Claim extraction, entailment, citations bound only after verification |
+| Orchestration | `standard_answer` graph with an abstention path, five nodes, protocol-injected dependencies |
+| API | `/health`, `/v1/answer` (JSON and SSE), `/v1/ingest`, identity resolution, one-place error mapping |
+| Observability | Span attribute schema with enforced redaction |
+| Local stack | `docker-compose.yml`, `Dockerfile`, seed script that proves a query answers end to end |
 
 ### Later phases
 
@@ -211,6 +216,28 @@ several times, which is how a system becomes most confident exactly where it is 
 
 **Silent truncation is prohibited.** If evidence was dropped or a query aspect went uncovered,
 the bundle carries a coverage warning and the response has to say so.
+
+## How answers are grounded
+
+**Citations are bound only after entailment is checked.** A plausible citation on a claim its
+source does not support is worse than no citation: an uncited claim reads as the model's
+assertion and a reader discounts it, while a cited one reads as verified. Post-hoc attachment
+converts an unsupported statement into an apparently checked one, most convincingly where the
+model was least reliable.
+
+**An invalid citation is a hallucination even when the claim is true.** A marker resolving to no
+evidence group in this request means the model cited something it was never given, and a system
+that tolerates that cannot tell a lucky guess from a grounded answer.
+
+**Abstention is a success state, returned as a 200 with an envelope.** A 4xx would make the
+abstention rate indistinguishable from client error in every dashboard that groups by status —
+and abstention rate is a metric with both an upper and a lower alert. Every abstention carries a
+reason code and, where possible, a suggested next action.
+
+**Streaming buffers to a sentence boundary.** Releasing token by token runs the output guardrails
+after the client has already read the text, which is not a guardrail. Corrections are part of the
+SSE protocol rather than an embarrassment: grounding runs on the complete answer, and a claim can
+fail it after the reader has seen it.
 
 ## Documentation
 

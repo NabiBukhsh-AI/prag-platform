@@ -47,13 +47,19 @@ test: ## Everything that does not need cloud credentials
 
 check: lint types test-unit test-contract ## What CI runs before the slow suites
 
-up: ## Bring up the full local stack
+up: ## Bring up the local stack (api only)
 	docker compose up -d
+
+up-full: ## Bring up the api plus Postgres, Redis and Qdrant
+	docker compose --profile full up -d
+
+serve: ## Run the API directly, without docker
+	$(BIN)/uvicorn prag.api.http.main:app --reload --port 8080
 
 down: ## Tear down the local stack
 	docker compose down -v
 
-seed: ## Seed the local corpus
+seed: ## Seed the local corpus and prove one query answers end to end
 	$(BIN)/python scripts/seed_corpus.py
 
 eval: ## Run the evaluation suite and print the scorecard

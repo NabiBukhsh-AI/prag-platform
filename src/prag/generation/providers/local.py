@@ -47,8 +47,26 @@ _FILLER_TEXT = (
 _FILLER = frozenset(_FILLER_TEXT.split())
 
 
+#: Tokens are expanded to a stem prefix as well as the whole word, so that "escalated" in a
+#: question matches "escalation" in a document. Without it the provider selects sentences by
+#: exact word overlap and misses the one the retriever ranked first — which is the most common
+#: way a lexical matcher fails on questions as people actually phrase them.
+#:
+#: Prefix length is a compromise: long enough that unrelated words rarely collide, short enough
+#: to survive the inflections English actually uses.
+_STEM_LENGTH = 5
+
+
 def _tokens(text: str) -> frozenset[str]:
-    return frozenset(t for t in _WORD.findall(text.lower()) if t not in _FILLER and len(t) > 2)
+    """Content tokens, each accompanied by its stem prefix."""
+    expanded: set[str] = set()
+    for token in _WORD.findall(text.lower()):
+        if token in _FILLER or len(token) <= 2:
+            continue
+        expanded.add(token)
+        if len(token) > _STEM_LENGTH:
+            expanded.add(token[:_STEM_LENGTH])
+    return frozenset(expanded)
 
 
 class LocalExtractiveProvider:
