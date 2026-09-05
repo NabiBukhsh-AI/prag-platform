@@ -162,9 +162,16 @@ class DeterministicEmbeddingProvider:
         # Purpose is mixed into the seed, so query and document vectors for identical text
         # differ. Salting the whole vector would make the two unrelated; salting the seed keeps
         # them close but distinguishable, which is how asymmetric models actually behave.
-        seed = hashlib.blake2b(
-            f"{purpose}:{text}".encode(), digest_size=self.dimensions * 2
-        ).digest()
+        # blake2b caps at 64 bytes, so wider vectors are built from successive counter-keyed
+        # digests rather than one oversized one. Requesting more than the cap raises rather
+        # than truncating, which is how this silently worked only below 33 dimensions.
+        needed = self.dimensions * 2
+        seed = b""
+        counter = 0
+        while len(seed) < needed:
+            seed += hashlib.blake2b(f"{purpose}:{counter}:{text}".encode(), digest_size=64).digest()
+            counter += 1
+
         raw = [
             int.from_bytes(seed[i * 2 : i * 2 + 2], "big") / 65535.0 - 0.5
             for i in range(self.dimensions)
