@@ -53,7 +53,7 @@ Phase 1 in progress. The build order is followed strictly: `core/` first and in 
 contract suites, then storage with in-memory fakes, then the graph engine, then vertical slices
 one at a time.
 
-**360 tests passing**, ruff clean, dependency contracts enforced.
+**407 tests passing**, ruff clean, dependency contracts enforced.
 
 ### Foundations — complete
 
@@ -71,8 +71,9 @@ one at a time.
 |---|---|
 | Ingestion: Document IR, normalization, chunking, indexing | done |
 | Retrieval: vector `KnowledgeSource` with parent-child and ACL filtering | done |
-| Context builder with region budgeting | next |
-| `LLMProvider` and citation binding | not started |
+| Evidence grouping: near-duplicate linking and independence marking | done |
+| Context builder: region budgeting, packing, ordering, rendering | done |
+| `LLMProvider` and citation binding | next |
 | `standard_answer` graph definition | not started |
 | FastAPI layer, middleware, SSE | not started |
 | `docker-compose.yml` and the seed script | not started |
@@ -181,6 +182,35 @@ difference even when it never reaches the response.
 **Running out of time is not a source failing.** A deadline breach returns a partial result;
 wrapping it as an unavailable source would open the circuit breaker on a healthy backend and
 turn one slow query into an outage.
+
+## How context is assembled
+
+**Regions, not concatenation.** The window is partitioned into named regions with explicit
+allocations. That makes overflow deterministic, and it is the structural basis for injection
+defense: the evidence region carries no instruction authority, and a string built by
+concatenation cannot express "this part is data".
+
+**The evidence cap is a quality control, not a cost control.** Past roughly 8k tokens, marginal
+retrieved chunks lower answer quality by diluting attention — so evidence is capped even when
+the window has room to spare. Raising the cap to fill the window makes answers worse.
+
+**Packing optimises value per token, with two corrections.** A redundancy penalty stops the
+greedy pass filling the budget with near-identical chunks about the most salient aspect, which
+are exactly the chunks that score highest. A coverage bonus rewards evidence touching an aspect
+nothing selected has covered yet — the difference between answering the loudest part of a
+question very well and answering the question.
+
+**Ordering is not cosmetic.** Attention over a long context is not uniform, so edge-weighted
+ordering puts the strongest evidence at both ends and the weakest in the middle. Chronological
+and source-grouped modes exist because they are correct for timeline and source-comparison
+queries respectively.
+
+**Near-duplicates are linked, not dropped.** Three documents quoting one press release are one
+piece of evidence. The link is what stops the agreement signal from counting a single fact
+several times, which is how a system becomes most confident exactly where it is most wrong.
+
+**Silent truncation is prohibited.** If evidence was dropped or a query aspect went uncovered,
+the bundle carries a coverage warning and the response has to say so.
 
 ## Documentation
 

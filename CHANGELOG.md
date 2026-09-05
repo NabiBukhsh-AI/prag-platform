@@ -30,6 +30,11 @@ versions. Their compatibility rules are specified separately.
   `VectorStore`, with its own conformance suite.
 - `retrieval`: a vector `KnowledgeSource` doing parent-child retrieval with index-side ACL
   filtering, plus `ingestion.indexing` to close the ingest-to-retrieve loop.
+- `evidence.dedup`: near-duplicate grouping that links rather than drops, and marks
+  cross-group independence from shared lineage.
+- `context`: region allocation with a hard evidence cap, value-density packing with redundancy
+  and coverage corrections, four ordering modes, and a renderer where the evidence region
+  carries no instruction authority.
 - Repository scaffolding: packaging metadata, Apache-2.0 license, Makefile targets for the
   development, test, and evaluation loops.
 - `importlinter.ini` encoding the dependency contracts as enforced CI checks: `core` imports
