@@ -34,6 +34,7 @@ __all__ = [
     "GenerationResult",
     "GroundingReport",
     "ModelSpec",
+    "ShadowReport",
     "TokenUsage",
     "ToolCall",
     "ToolSchema",
@@ -116,6 +117,10 @@ class GenerationRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     request_id: str
+    #: The tenant the request serves. Required whenever adapters are requested: the serving
+    #: layer re-checks every adapter's scope against it at the point weights are applied,
+    #: which is the last place a cross-tenant delta can still be refused.
+    tenant_id: str | None = None
     spec: ModelSpec
     regions: tuple[RenderedRegion, ...]
     tools: tuple[ToolSchema, ...] = ()
@@ -173,6 +178,9 @@ class GenerationResult(BaseModel):
     model_id: str
     model_version: str
     provider_id: str
+    #: Mean token logprob over content tokens, when the provider reports one. A raw input to
+    #: parametric confidence, never a confidence itself: raw logprobs are badly calibrated.
+    mean_logprob: float | None = None
 
 
 class Citation(BaseModel):
@@ -320,3 +328,17 @@ class AnswerEnvelope(BaseModel):
         stay broken invisibly.
         """
         return not self.has_warnings and self.grounding.claims_unsourced == 0
+
+
+class ShadowReport(BaseModel):
+    """Provenance shadowing's verdict on a parametric answer.
+
+    ``grounding`` binds citations only to claims the retrieved evidence entails; every other
+    claim is unsourced. ``conflicts`` holds claims the evidence contradicts, and any conflict
+    means the evidence wins: the parametric answer is not served.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    grounding: GroundingReport
+    conflicts: tuple[ConflictEvent, ...] = ()

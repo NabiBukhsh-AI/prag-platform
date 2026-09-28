@@ -25,6 +25,7 @@ from prag.core.models.events import DomainEvent, EventKind
 from prag.core.models.guardrails import GuardrailPayload
 from prag.evaluation import sampled
 from prag.evidence import CandidateGrouper, LexicalOverlapReranker
+from prag.fusion import ConflictMonitor, EntailmentProvenanceShadower
 from prag.generation import (
     HeuristicGroundingVerifier,
     LocalExtractiveProvider,
@@ -44,13 +45,24 @@ from prag.observability import (
     request_spans,
 )
 from prag.orchestration import (
+    PARAMETRIC_CONDITIONS,
     AbstainNode,
     AnalyzeNode,
     BuildContextNode,
     GenerateNode,
     GraphEngine,
+    ParametricNode,
     RetrieveNode,
+    ShadowNode,
+    parametric_answer_graph,
     standard_answer_graph,
+)
+from prag.parametric import (
+    AdapterRegistry,
+    CentroidAdapterSelector,
+    InMemoryBlobStore,
+    LocalParametricProvider,
+    LruAdapterStore,
 )
 from prag.retrieval import (
     InMemoryLexicalIndex,
@@ -60,6 +72,7 @@ from prag.retrieval import (
     SourceSpec,
     VectorKnowledgeSource,
 )
+from prag.storage.repositories import InMemoryAdapterRepository
 from prag.storage.vectorstore import InMemoryVectorStore
 
 if TYPE_CHECKING:
@@ -142,6 +155,63 @@ def _outcome_of(exc: PragError) -> str:
     return "error"
 
 
+#: The base model the local parametric route serves adapters against. Adapters trained for any
+#: other version are never selected: a delta applied to the wrong base degrades output silently.
+PARAMETRIC_BASE_MODEL = ("base.lora", "1")
+
+
+@dataclass(slots=True)
+class ParametricTier:
+    """The parametric tier's moving parts, present only when ``parametric.enabled``."""
+
+    registry: AdapterRegistry
+    node: ParametricNode
+    monitor: ConflictMonitor
+    #: ``adapter_id@version`` keys whose clusters need retraining, oldest first. The
+    #: parameterization workflow consumes this; nothing on the request path waits on it.
+    retrain_queue: list[str] = field(default_factory=list)
+
+    def covers(self, tenant_id: str, domain: str, tenant_scoped_only: bool) -> bool:
+        return self.registry.covers(tenant_id, domain, tenant_scoped_only=tenant_scoped_only)
+
+
+def _build_parametric(settings: PragSettings, embedder: HashingEmbeddingProvider) -> ParametricTier:
+    config = settings.parametric
+    repository = InMemoryAdapterRepository()
+    blobs = InMemoryBlobStore()
+    store = LruAdapterStore(repository, blobs, capacity=config.hot_adapters)
+    registry = AdapterRegistry(repository, blobs, store)
+    model_id, model_version = PARAMETRIC_BASE_MODEL
+    router = PolicyModelRouter(
+        {
+            model_id: ModelOption(
+                model_id=model_id,
+                model_version=model_version,
+                provider_id="local.parametric",
+                context_window=8_000,
+                # Cheaper per request than the grounded path by design: no evidence prefill.
+                cost_per_1k_in=0.0005,
+                cost_per_1k_out=0.0015,
+            )
+        },
+        default_model=model_id,
+    )
+    node = ParametricNode(
+        CentroidAdapterSelector(
+            registry,
+            embedder,
+            base_model_version=model_version,
+            min_coverage=config.selection.min_coverage_similarity,
+            max_concurrent=config.selection.max_concurrent_adapters,
+            composition_mode=config.selection.composition_mode,
+        ),
+        router,
+        LocalParametricProvider(store, composition_mode=config.selection.composition_mode),
+        max_adapters=config.selection.max_concurrent_adapters,
+    )
+    return ParametricTier(registry=registry, node=node, monitor=ConflictMonitor())
+
+
 @dataclass(slots=True)
 class Platform:
     """Everything a request needs, wired and ready.
@@ -161,6 +231,7 @@ class Platform:
     guardrails: GuardrailSet
     events: InMemoryEventBus = field(default_factory=InMemoryEventBus)
     metrics: Metrics = field(default_factory=Metrics)
+    parametric: ParametricTier | None = None
     collection: str = "chunks"
 
     def request_state(self, query: str, headers: dict[str, str]) -> RequestState:
@@ -212,12 +283,32 @@ class Platform:
                     _event(final, EventKind.ISOLATION_ALERT, reason_code=exc.reason_code)
                 )
             self._finish(final, _outcome_of(exc), started_ms, started)
+            await self._apply_adapter_decisions()
             raise
 
         result = run.state.result
         outcome = "abstained" if result is None or result.abstained else "answered"
         self._finish(run.state, outcome, started_ms, started)
+        await self._apply_adapter_decisions()
         return run
+
+    async def _apply_adapter_decisions(self) -> None:
+        """Act on the conflict monitor: demote critical adapters, queue stale ones for retraining.
+
+        After publishing rather than inside the bus handler, because demotion is a registry write
+        and a handler must not block the request that published to it. A demoted adapter's
+        traffic falls back to the non-parametric path on the very next request.
+        """
+        if self.parametric is None:
+            return
+        from prag.core.models.parametric import AdapterStatus
+
+        retrain, demote = self.parametric.monitor.take()
+        for key in sorted(demote):
+            adapter_id, _, version = key.rpartition("@")
+            await self.parametric.registry.set_status(adapter_id, version, AdapterStatus.DEPRECATED)
+        queue = self.parametric.retrain_queue
+        queue.extend(key for key in sorted(retrain) if key not in queue)
 
     def _finish(self, state: RequestState, outcome: str, started_ms: int, started: float) -> None:
         elapsed = int((time.monotonic() - started) * 1000)
@@ -409,50 +500,63 @@ def build_platform(
         ordering_mode=settings.context.ordering_mode,
     )
 
-    engine = GraphEngine(
-        standard_answer_graph(),
-        {
-            "analyze": AnalyzeNode(
-                CascadeQueryAnalyzer(),
-                UtilityStrategyRouter(
-                    exploration_fraction=settings.routing.exploration_fraction,
-                    hedge_above_uncertainty=settings.intelligence.hedge_above_uncertainty,
-                    # No adapter exists yet, so the parametric route is unavailable regardless
-                    # of policy. Saying so here keeps the router's elimination reason accurate:
-                    # "no adapter covers this domain" rather than a policy that is not the cause.
-                    parametric_available=False,
-                ),
-            ),
-            "retrieve": RetrieveNode(
-                SourcePlanner(
-                    source_specs,
-                    top_k=settings.retrieval.top_k,
-                    wall_ms=settings.retrieval.wall_ms,
-                    fusion_k=settings.retrieval.fusion_k,
-                ),
-                orchestrator,
-                CandidateGrouper(),
-                reranker=LexicalOverlapReranker(),
-                screen=guardrails.screen,
-                wall_ms=settings.retrieval.wall_ms,
-            ),
-            "build_context": BuildContextNode(builder, router),
-            "generate": GenerateNode(
-                LocalExtractiveProvider(),
-                HeuristicGroundingVerifier(
-                    entailment_threshold=settings.fusion.provenance_entailment_threshold
-                ),
-                RegionPromptRenderer(),
-                system_prompt=system_prompt,
-            ),
-            "abstain": AbstainNode(),
-        },
+    verifier = HeuristicGroundingVerifier(
+        entailment_threshold=settings.fusion.provenance_entailment_threshold
     )
+    parametric = (
+        _build_parametric(settings, embedder) if settings.parametric.enabled else None
+    )
+
+    nodes: dict[str, object] = {
+        "analyze": AnalyzeNode(
+            CascadeQueryAnalyzer(),
+            UtilityStrategyRouter(
+                exploration_fraction=settings.routing.exploration_fraction,
+                hedge_above_uncertainty=settings.intelligence.hedge_above_uncertainty,
+                # With the tier off, the parametric route is unavailable regardless of policy,
+                # and the router says so: "no adapter covers this domain" rather than a policy
+                # that is not the cause. With it on, coverage is read per tenant and domain.
+                parametric_available=parametric is not None,
+                adapter_coverage=parametric.covers if parametric is not None else None,
+            ),
+        ),
+        "retrieve": RetrieveNode(
+            SourcePlanner(
+                source_specs,
+                top_k=settings.retrieval.top_k,
+                wall_ms=settings.retrieval.wall_ms,
+                fusion_k=settings.retrieval.fusion_k,
+            ),
+            orchestrator,
+            CandidateGrouper(),
+            reranker=LexicalOverlapReranker(),
+            screen=guardrails.screen,
+            wall_ms=settings.retrieval.wall_ms,
+        ),
+        "build_context": BuildContextNode(builder, router),
+        "generate": GenerateNode(
+            LocalExtractiveProvider(),
+            verifier,
+            RegionPromptRenderer(),
+            system_prompt=system_prompt,
+        ),
+        "abstain": AbstainNode(),
+    }
+    if parametric is None:
+        engine = GraphEngine(standard_answer_graph(), nodes)  # type: ignore[arg-type]
+    else:
+        nodes["parametric"] = parametric.node
+        nodes["shadow"] = ShadowNode(EntailmentProvenanceShadower(verifier))
+        engine = GraphEngine(
+            parametric_answer_graph(),
+            nodes,  # type: ignore[arg-type]
+            conditions=PARAMETRIC_CONDITIONS,
+        )
 
     container.register_instance(TraceRecorder, tracer)
     container.register_instance(GraphEngine, engine)
 
-    return Platform(
+    platform = Platform(
         settings=settings,
         engine=engine,
         container=container,
@@ -461,4 +565,8 @@ def build_platform(
         embedder=embedder,
         lexical_index=lexical_index,
         guardrails=guardrails,
+        parametric=parametric,
     )
+    if parametric is not None:
+        platform.events.subscribe(parametric.monitor.observe)
+    return platform

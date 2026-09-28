@@ -26,6 +26,7 @@ from prag.parametric.pipeline import (
 )
 from prag.parametric.registry import AdapterRegistry
 from prag.parametric.selection import CentroidAdapterSelector
+from prag.parametric.serving import LocalParametricProvider
 from prag.parametric.store import InMemoryBlobStore, LruAdapterStore, blob_key, sha256
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "Cluster",
     "EligibilityGate",
     "InMemoryBlobStore",
+    "LocalParametricProvider",
     "LruAdapterStore",
     "MemorizingTrainer",
     "ParameterizationReport",

@@ -21,8 +21,15 @@ from prag.orchestration.nodes import (
     RetrieveNode,
     standard_answer_graph,
 )
+from prag.orchestration.parametric import (
+    PARAMETRIC_CONDITIONS,
+    ParametricNode,
+    ShadowNode,
+    parametric_answer_graph,
+)
 
 __all__ = [
+    "PARAMETRIC_CONDITIONS",
     "AbstainNode",
     "AnalyzeNode",
     "BuildContextNode",
@@ -32,7 +39,10 @@ __all__ = [
     "GraphDefinition",
     "GraphEngine",
     "GraphRun",
+    "ParametricNode",
     "RetrieveNode",
+    "ShadowNode",
     "StepRecord",
+    "parametric_answer_graph",
     "standard_answer_graph",
 ]

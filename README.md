@@ -49,11 +49,11 @@ Five decisions carry the design:
 
 ## Status
 
-**Phases 1, 2 and 3 are complete** — Phase 3 up to the items that need production traffic. The
+**Phases 1 to 4 are complete** — up to the items that need production traffic or GPUs. The
 build order was followed strictly: `core/` first and in full, then the contract suites, then
 storage with in-memory fakes, then the graph engine, then vertical slices one at a time.
 
-**760 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
+**840 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
 evaluation gate passing on the seed golden and adversarial sets. CI runs all of it on every push
 and pull request, and every step blocks.
 
@@ -133,11 +133,32 @@ per-source embedding distributions). The last two are reported as deferred on `/
 than assumed covered. Evidence-utilization, adapter and calibration-drift alerts arrive with the
 phases that produce those signals; `alerts.yml` lists them.
 
+### Phase 4 — complete (local stand-in for training and serving)
+
+| Slice | What it delivers |
+|---|---|
+| Eligibility gate | A pure function reporting every hard blocker — knowledge class, ACL narrower than the tenant, revocation SLA shorter than the retrain cadence, exact quotation, short half-life, per-claim provenance without shadowing, contested, PII — and weighing economics (volume, savings threshold, cluster coherence) only once none apply |
+| Adapter registry | The single writer for immutable rows, weight blobs, residency and the routing snapshot; promotion deprecates the previous version; erasing a document revokes and evicts every adapter trained on it |
+| Residency | LRU cache that re-reads registry status on every load and verifies blob checksums on cold loads, so a stale selection cannot load a revoked or corrupted adapter |
+| Selection | Tenant scope is a hard filter before scoring, re-asserted per record; base-model and embedding-version mismatches are excluded; below the coverage floor it returns nothing |
+| Offline pipeline | Clustering, augmentation with a non-optional entailment/dedup/diversity filter, training, held-out recall, general-regression and interference probes, the promotion gate, shadow, then active — and tenant knowledge can never train a global adapter |
+| Parametric route | `parametric_answer` graph: the adapter answers with no evidence, retrieval runs as provenance shadowing, entailed claims are cited and the rest marked unsourced, and the answer states it came from learned knowledge |
+| Evidence wins | A claim the corpus contradicts sends the request down the grounded path and publishes a conflict event naming the adapter |
+| Serving-to-training loop | A per-adapter conflict-rate monitor queues stale adapters for retraining and demotes critical ones, whose traffic falls back to retrieval on the next request |
+| Isolation | Cross-tenant canaries at selection, training and serving: the weight store refuses a foreign or unattributed adapter at load |
+| Comparison | `scripts/compare_parametric.py` runs the golden set with and without the tier and reports route, cost, latency, groundedness and completeness |
+
+**Training and serving use a local stand-in** (`prag.parametric.local`) that memorises filtered
+QA pairs. It exercises every gate and route without a GPU and says nothing about how well LoRA
+learns; PEFT training and vLLM multi-LoRA serving replace it behind the same shapes. On the seed
+set, 2 of 9 queries are served parametrically at about 3% of the grounded path's cost with equal
+groundedness, and the rest fall back — mostly because the local hashing embedder's coverage scores
+are low, which is why the tests and comparison lower the coverage floor from 0.62 to 0.35.
+
 ### Later phases
 
 | Phase | Scope | State |
 |---|---|---|
-| 4 | Parametric tier | not started |
 | 5 | Fusion, memory, structured knowledge | not started |
 | 6 | Bounded agents | not started |
 | 7 | Scale and multi-tenancy hardening | not started |

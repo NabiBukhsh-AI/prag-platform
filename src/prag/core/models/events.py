@@ -35,6 +35,9 @@ class EventKind(StrEnum):
     INDEX_FEEDBACK = "index_feedback"
     #: Drives per-adapter staleness aggregation and the retraining trigger.
     PARAMETRIC_RETRIEVAL_CONFLICT = "parametric_retrieval_conflict"
+    #: A parametric answer that shadowing let through. The denominator of the per-adapter
+    #: conflict rate; without it, conflicts are counts rather than a rate.
+    PARAMETRIC_SERVED = "parametric_served"
     SECURITY_EVENT = "security_event"
     #: An ACL recheck mismatch or a canary sighting. Pages a human.
     ISOLATION_ALERT = "isolation_alert"

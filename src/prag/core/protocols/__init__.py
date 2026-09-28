@@ -31,7 +31,11 @@ from prag.core.protocols.evidence import (
     PromptRenderer,
     Reranker,
 )
-from prag.core.protocols.fusion import ConfidenceCalibrator, FusionPolicy
+from prag.core.protocols.fusion import (
+    ConfidenceCalibrator,
+    FusionPolicy,
+    ProvenanceShadower,
+)
 from prag.core.protocols.generation import GroundingVerifier, LLMProvider, ModelRouter
 from prag.core.protocols.ingestion import Chunker, Extractor, TokenCounter
 from prag.core.protocols.intelligence import (
@@ -86,6 +90,7 @@ __all__ = [
     "ModelRouter",
     "ParametricEligibilityGate",
     "PromptRenderer",
+    "ProvenanceShadower",
     "QueryAnalyzer",
     "QueryTransformer",
     "Reranker",

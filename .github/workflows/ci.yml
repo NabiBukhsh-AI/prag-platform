@@ -43,3 +43,8 @@ jobs:
       # tolerance from the committed baseline in eval/seed/baselines/.
       - name: Evaluation gate
         run: python scripts/run_eval.py
+
+      # A report, not a gate: it proves the parametric route still trains, serves and falls back
+      # end to end. Its numbers come from the local stand-in model; see the script's docstring.
+      - name: Parametric comparison (smoke)
+        run: python scripts/compare_parametric.py

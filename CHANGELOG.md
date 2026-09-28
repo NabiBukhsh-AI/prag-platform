@@ -11,6 +11,9 @@ versions. Their compatibility rules are specified separately.
 ## [Unreleased]
 
 ### Changed
+- The strategy router checks adapter coverage per tenant and domain, and admits private-data
+  queries to the parametric route only with a tenant-scoped adapter.
+- The parametric/retrieval independence contract now covers both packages.
 - A request that ends by exception now carries its state on the exception (set by the engine),
   and `Platform.answer` publishes, counts and traces every outcome through one finish step. A
   request that abstained after the retrieval screen dropped groups used to lose those security
@@ -28,12 +31,28 @@ versions. Their compatibility rules are specified separately.
   set and the adversarial suite.
 
 ### Fixed
+- Cluster coherence is clamped to 1.0; float error on a one-member cluster produced a value the
+  economics model rejects.
 - The local extractive provider padded answers with sentences sharing a single word with the
   query. It now keeps only sentences within a relative margin of the best match; the evaluation
   gate caught this as citation precision 0.87 against a 0.95 floor.
 - `httpx` is declared in the `dev` extra; FastAPI's test client needs it.
 
 ### Added
+- `parametric`: the eligibility gate, the adapter registry, checksum-verified LRU residency,
+  the tenant-scoped centroid selector, and document revocation.
+- `parametric.pipeline`: clustering, augmentation and its quality filter, training, probes, the
+  promotion gate, and shadow-to-active promotion.
+- `parametric.local` and `parametric.serving`: the local stand-in trainer and multi-adapter
+  provider, supporting single-best, weighted-merge and sequential-probe composition.
+- `fusion`: per-sentence stance detection, entailment-based provenance shadowing, and the
+  per-adapter conflict monitor that queues retraining and demotes adapters.
+- `orchestration.parametric`: the parametric and shadow nodes and the `parametric_answer` graph,
+  used only when `parametric.enabled` is set.
+- `scripts/compare_parametric.py`: parametric versus non-parametric on the same corpus subset.
+- `core`: `ProvenanceShadower`, `ShadowReport`, `EventKind.PARAMETRIC_SERVED`,
+  `GenerationRequest.tenant_id`, `GenerationResult.mean_logprob`, and
+  `AdapterRecord.blob_sha256`.
 - `observability.events`: an in-memory event bus. Every request publishes its accumulated events
   once it has finished, whatever the outcome; a failing consumer never fails the publisher.
 - `observability.metrics`: declared metrics with enforced label sets, rendered in Prometheus

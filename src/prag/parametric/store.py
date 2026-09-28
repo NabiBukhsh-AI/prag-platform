@@ -18,7 +18,7 @@ import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-from prag.core.errors import AdapterLoadError
+from prag.core.errors import AdapterLoadError, IsolationViolation
 from prag.core.models.parametric import AdapterStatus, LoadedAdapter
 
 if TYPE_CHECKING:
@@ -73,11 +73,33 @@ class LruAdapterStore:
         self.warm_loads = 0
 
     async def load(
-        self, adapter_id: str, version: str, *, include_shadow: bool = False
+        self,
+        adapter_id: str,
+        version: str,
+        *,
+        include_shadow: bool = False,
+        tenant_id: str | None = None,
     ) -> LoadedAdapter:
-        """Make an adapter resident. ``include_shadow`` admits shadow adapters for mirrored
-        traffic, whose output is compared offline and never returned to a caller."""
+        """Make an adapter resident.
+
+        ``include_shadow`` admits shadow adapters for mirrored traffic, whose output is compared
+        offline and never returned to a caller. ``tenant_id``, when given, is checked against the
+        adapter's scope here too — the last point at which a cross-tenant delta can be refused.
+        A mismatch is an isolation violation, not a load failure: it means selection let
+        through something it must never let through.
+        """
         record = await self._repository.get(adapter_id, version)
+        if (
+            tenant_id is not None
+            and record is not None
+            and not (record.is_global or record.tenant_scope == tenant_id)
+        ):
+            raise IsolationViolation(
+                "adapter scoped to another tenant was requested",
+                adapter_id=adapter_id,
+                version=version,
+                requesting_tenant=tenant_id,
+            )
         allowed = {AdapterStatus.ACTIVE} | ({AdapterStatus.SHADOW} if include_shadow else set())
         if record is None or record.status not in allowed:
             await self.evict(adapter_id, version)

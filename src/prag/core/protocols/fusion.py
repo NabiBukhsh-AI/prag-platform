@@ -8,18 +8,22 @@ an automated retraining job.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
+from prag.core.models.common import Deadline
 from prag.core.models.context import ContextBundle, ContextValidation
 from prag.core.models.fusion import (
     KnowledgeDecision,
     ParametricSignal,
     RawConfidenceSignals,
 )
+from prag.core.models.generation import ShadowReport
 from prag.core.models.identity import TenantPolicy
 from prag.core.models.query import QueryAnalysis
+from prag.core.models.retrieval import EvidenceGroup
 
-__all__ = ["ConfidenceCalibrator", "FusionPolicy"]
+__all__ = ["ConfidenceCalibrator", "FusionPolicy", "ProvenanceShadower"]
 
 
 @runtime_checkable
@@ -82,5 +86,31 @@ class ConfidenceCalibrator(Protocol):
         detail. Calibration drifts silently, and every threshold in the fusion policy is
         expressed in terms of these numbers — so a drifting calibrator moves the system's
         behaviour without any configuration having changed.
+        """
+        ...
+
+
+@runtime_checkable
+class ProvenanceShadower(Protocol):
+    """Attaches citations to a parametric answer after the fact, and catches contradictions.
+
+    A parametric answer is uncitable by construction. Shadowing retrieves candidate support for
+    each claim and cites only the claims the evidence entails; the rest are marked unsourced. It
+    is also a free correctness check: a claim the corpus contradicts is caught here, before it
+    reaches the user.
+    """
+
+    async def shadow(
+        self,
+        answer: str,
+        evidence: Sequence[EvidenceGroup],
+        adapter_ids: Sequence[str],
+        deadline: Deadline,
+    ) -> ShadowReport:
+        """Verify every claim of ``answer`` against ``evidence``.
+
+        Must never invent support: a citation binds only to evidence that entails the claim.
+        Every contradiction is returned as a ``ConflictEvent`` naming the adapters that produced
+        the claim, because the per-adapter conflict rate is what triggers retraining.
         """
         ...
