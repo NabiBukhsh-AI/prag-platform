@@ -188,6 +188,12 @@ class EligibilityConfig(BaseModel):
     block_if_pii: bool = True
     block_if_acl_narrower_than_tenant: bool = True
     block_if_requires_exact_quotation: bool = True
+    #: How often adapters are rebuilt. Knowledge whose takedown deadline is shorter than this
+    #: cannot live in weights: erasure would have to wait for a retrain that has not happened.
+    retrain_cadence_hours: float = Field(default=168.0, gt=0.0)
+    #: Whether parametric answers get post-hoc citations. Without it, regulated knowledge that
+    #: needs per-claim provenance has no citation path at all and must stay retrieved.
+    provenance_shadowing_enabled: bool = True
 
 
 class AdapterSelectionConfig(BaseModel):

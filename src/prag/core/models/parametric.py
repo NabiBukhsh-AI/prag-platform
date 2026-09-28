@@ -196,6 +196,10 @@ class AdapterRecord(BaseModel):
     status: AdapterStatus = AdapterStatus.CANDIDATE
     #: Lineage. Required for both revocation and provenance shadowing.
     source_document_ids: tuple[str, ...] = ()
+    #: SHA-256 of the weight blob as written. Verified on every cold load: a truncated or
+    #: corrupted delta does not error at inference, it degrades output in ways that look like a
+    #: bad prompt.
+    blob_sha256: str | None = None
 
     created_at_ms: int
     promoted_at_ms: int | None = None

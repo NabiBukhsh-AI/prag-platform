@@ -27,8 +27,14 @@ from typing import TYPE_CHECKING
 from prag.core.models.query import KnowledgeRequirement, Strategy, StrategyDecision
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from prag.core.models.identity import Budget, Principal, TenantPolicy
     from prag.core.models.query import QueryAnalysis
+
+    #: ``(tenant_id, domain, tenant_scoped_only) -> covered``. Synchronous by contract: it runs
+    #: on every request, so it reads a snapshot rather than a database.
+    AdapterCoverage = Callable[[str, str, bool], bool]
 
 __all__ = ["QualityTable", "StrategyProfile", "UtilityStrategyRouter"]
 
@@ -120,15 +126,19 @@ class UtilityStrategyRouter:
         exploration_fraction: float = 0.0,
         hedge_above_uncertainty: float = 0.35,
         parametric_available: bool = False,
+        adapter_coverage: AdapterCoverage | None = None,
         rng: random.Random | None = None,
     ) -> None:
         self._quality = quality_table or QualityTable()
         self._profiles = profiles or DEFAULT_PROFILES
         self._exploration = exploration_fraction
         self._hedge_above = hedge_above_uncertainty
-        #: Whether any adapter exists at all. Distinct from the tenant's policy: the platform may
-        #: have the tier switched on while this tenant has no adapter covering anything.
+        #: Whether the parametric tier is switched on at all. Distinct from the tenant's policy,
+        #: and from coverage: the tier may be on while this tenant has no adapter for anything.
         self._parametric_available = parametric_available
+        #: Per-tenant, per-domain coverage. Without it, "available" is taken to cover every
+        #: domain except private data, which needs a tenant-scoped adapter the router cannot see.
+        self._coverage = adapter_coverage
         self._rng = rng or random.Random()
 
     def route(
@@ -138,7 +148,7 @@ class UtilityStrategyRouter:
         budget: Budget,
         policy: TenantPolicy,
     ) -> StrategyDecision:
-        eliminated = self._hard_constraints(analysis, policy)
+        eliminated = self._hard_constraints(analysis, policy, principal.tenant_id)
         survivors = [s for s in Strategy if s not in eliminated]
 
         if not survivors:
@@ -182,7 +192,7 @@ class UtilityStrategyRouter:
         )
 
     def _hard_constraints(
-        self, analysis: QueryAnalysis, policy: TenantPolicy
+        self, analysis: QueryAnalysis, policy: TenantPolicy, tenant_id: str
     ) -> dict[Strategy, str]:
         """Eliminate strategies that cannot serve this query, with the reason for each.
 
@@ -190,10 +200,16 @@ class UtilityStrategyRouter:
         analysis, and a reason that is rephrased between versions cannot be grouped over time.
         """
         eliminated: dict[Strategy, str] = {}
+        domain = str(analysis.domain.value)
+
+        def covered(tenant_scoped_only: bool) -> bool:
+            if self._coverage is None:
+                return not tenant_scoped_only
+            return self._coverage(tenant_id, domain, tenant_scoped_only)
 
         if not policy.parametric_enabled:
             eliminated[Strategy.PARAMETRIC] = "tenant_policy_forbids_parametric"
-        elif not self._parametric_available:
+        elif not self._parametric_available or not covered(False):
             eliminated[Strategy.PARAMETRIC] = "no_adapter_covers_this_domain"
         elif analysis.requires(KnowledgeRequirement.REQUIRES_LIVE_DATA):
             # Weights are a snapshot. A snapshot answering "what is it right now" is wrong in a
@@ -201,9 +217,11 @@ class UtilityStrategyRouter:
             eliminated[Strategy.PARAMETRIC] = "requires_live_data"
         elif analysis.requires(KnowledgeRequirement.REQUIRES_EXACT_QUOTATION):
             eliminated[Strategy.PARAMETRIC] = "requires_exact_quotation"
-        elif analysis.requires(KnowledgeRequirement.REQUIRES_PRIVATE_DATA):
-            # Parameters cannot be filtered per request. Serving tenant-specific knowledge from
-            # a shared adapter is the failure that cannot be walked back.
+        elif analysis.requires(KnowledgeRequirement.REQUIRES_PRIVATE_DATA) and not covered(True):
+            # Parameters cannot be filtered per request, so private data is only answerable from
+            # an adapter scoped to this tenant. A global adapter cannot know the tenant's data,
+            # and a confident general answer to a question about it is the most damaging
+            # failure this system can produce.
             eliminated[Strategy.PARAMETRIC] = "requires_private_data_without_tenant_adapter"
 
         if Strategy.PARAMETRIC in eliminated:
