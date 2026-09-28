@@ -1,0 +1,120 @@
+# Prometheus alert rules for prag, per architecture §16.3.
+#
+# Every metric and label used here is declared in src/prag/observability/metrics.py, and
+# tests/unit/test_observability_config.py fails the build if one is not. An alert on a metric
+# that no longer exists does not fire — it goes quiet, which reads as the problem having gone
+# away.
+#
+# severity: page   -> wake someone now. Isolation failures only: they cannot be walked back.
+# severity: ticket -> a human looks within the working day.
+#
+# Not yet expressible, because the signal arrives with a later phase:
+#   evidence utilization drop   (counterfactual ablation, Phase 3 online evaluation workers)
+#   adapter conflict rate breach, cold adapter load rate   (Phase 4 parametric tier)
+#   calibration error drift on the confidence model        (Phase 5 fusion)
+
+groups:
+  - name: prag-isolation
+    rules:
+      - alert: PragIsolationViolation
+        expr: sum(increase(prag_requests_total{outcome="isolation_violation"}[5m])) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: A request crossed a tenant boundary and was failed.
+          description: >-
+            A canary or an isolation check fired inside retrieval. Something upstream — an
+            index filter, an ingest path, a cache key — put one tenant's content in another's
+            evidence. Treat as a security incident.
+
+      - alert: PragCanaryInOutput
+        expr: sum(increase(prag_guardrail_verdicts_total{reason="canary_detected"}[5m])) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: Another tenant's canary reached an answer and was blocked at output.
+
+      - alert: PragAclRecheckMismatch
+        expr: sum(increase(prag_guardrail_verdicts_total{reason="acl_recheck_mismatch"}[5m])) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: The ACL recheck dropped evidence the index filter let through.
+          description: >-
+            Always an index filter bug: the recheck exists because it does not trust the filter,
+            and it just proved the filter wrong.
+
+  - name: prag-quality
+    rules:
+      - alert: PragAbstentionRateSpike
+        # Guarded by volume so a quiet hour with two abstentions does not page anyone. A spike is
+        # usually an index or embedding problem, not a change in the query mix.
+        expr: >-
+          sum(rate(prag_requests_total{outcome="abstained"}[10m]))
+            / sum(rate(prag_requests_total[10m])) > 0.3
+          and sum(rate(prag_requests_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 30% of requests are abstaining.
+
+      - alert: PragCitationValidityDrop
+        expr: >-
+          sum(rate(prag_guardrail_verdicts_total{reason="invalid_citation"}[15m]))
+            / sum(rate(prag_requests_total{outcome="answered"}[15m])) > 0.05
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 5% of answers carried a citation to evidence not in context.
+
+      - alert: PragDegradationSustained
+        # Risk 10's early warning: the ladder opening on ordinary traffic means a stage — usually
+        # reranking — no longer fits the budget it was given.
+        expr: >-
+          sum(rate(prag_degradation_total{level!="0"}[10m]))
+            / sum(rate(prag_degradation_total[10m])) > 0.2
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 20% of requests are finishing degraded.
+
+      - alert: PragLatencyP95High
+        expr: >-
+          histogram_quantile(0.95, sum by (le) (rate(prag_request_duration_ms_bucket[5m]))) > 3000
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: p95 end-to-end latency above 3 s.
+
+  - name: prag-security
+    rules:
+      - alert: PragGuardrailErrors
+        # The chain fails closed, so a crashing detector is blocking traffic, not letting it by.
+        expr: sum(increase(prag_guardrail_verdicts_total{reason="guardrail_error"}[5m])) > 0
+        labels:
+          severity: ticket
+        annotations:
+          summary: A guardrail raised and the chain blocked the request.
+
+      - alert: PragDocumentInjectionSurge
+        expr: sum(increase(prag_guardrail_verdicts_total{reason="document_injection"}[1h])) > 10
+        labels:
+          severity: ticket
+        annotations:
+          summary: Retrieved documents are carrying injection attempts; review source health.
+
+  - name: prag-cost
+    rules:
+      - alert: PragCostPerRequestHigh
+        expr: >-
+          sum by (tenant) (rate(prag_cost_usd_total[1h]))
+            / sum by (tenant) (rate(prag_requests_total[1h])) > 0.05
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Tenant {{ $labels.tenant }} is above $0.05 per request."

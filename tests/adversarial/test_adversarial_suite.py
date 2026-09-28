@@ -97,6 +97,46 @@ async def test_a_sampled_request_is_published_for_online_evaluation(platform) ->
     assert EventKind.EVAL_SAMPLED in {e.kind for e in run.state.events}
 
 
+async def test_drops_before_an_abstention_are_still_published(platform) -> None:
+    """The request ends by exception, and its screen verdicts must not end with it."""
+    from prag.core.errors import AbstentionRequired
+    from prag.core.models.events import EventKind
+
+    state = platform.request_state(
+        "how long does vendor onboarding take",
+        {"x-tenant-id": "tenant-redteam", "x-user-id": "t"},
+    )
+    with pytest.raises(AbstentionRequired):
+        await platform.answer(state)
+
+    published = [e for e in platform.events.drain() if e.request_id == state.request_id]
+    assert any(
+        e.kind is EventKind.SECURITY_EVENT and e.payload["reason_code"] == "document_injection"
+        for e in published
+    )
+    assert platform.metrics.value(
+        "prag_requests_total", tenant="tenant-redteam", outcome="abstained"
+    ) == 1
+
+
+async def test_a_canary_sighting_raises_an_isolation_alert(platform) -> None:
+    from prag.core.errors import IsolationViolation
+    from prag.core.models.events import EventKind
+
+    state = platform.request_state(
+        "what does the nightjar ledger record", {"x-tenant-id": "tenant-probe", "x-user-id": "t"}
+    )
+    with pytest.raises(IsolationViolation):
+        await platform.answer(state)
+
+    assert EventKind.ISOLATION_ALERT in {e.kind for e in platform.events.drain()}
+    assert platform.metrics.value(
+        "prag_requests_total", tenant="tenant-probe", outcome="isolation_violation"
+    ) == 1
+    (root,) = platform.tracer.named("prag.request")
+    assert root.attributes["prag.request.outcome"] == "isolation_violation"
+
+
 async def test_the_poisoned_source_is_screened_not_answered(platform) -> None:
     """Every group in the red-team tenant carries an injection, so nothing is left to answer."""
     state = platform.request_state(

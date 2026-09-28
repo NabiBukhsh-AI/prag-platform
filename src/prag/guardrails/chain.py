@@ -36,19 +36,22 @@ class ChainOutcome:
     def blocking(self) -> GuardrailVerdict | None:
         return next((v for v in self.verdicts if v.blocked), None)
 
-    def raise_if_blocked(self) -> None:
+    def raise_if_blocked(self, state: object = None) -> None:
         """Raise ``GuardrailBlocked`` carrying the reason code and never the detail.
 
         The detail may quote an injected span or name a secret's kind; a client is told that a
-        guardrail refused and which one, and the rest stays in the trace.
+        guardrail refused and which one, and the rest stays in the trace. ``state`` rides on the
+        exception so the caller can still publish the verdicts that caused the refusal.
         """
         verdict = self.blocking
         if verdict is not None:
-            raise GuardrailBlocked(
+            error = GuardrailBlocked(
                 f"request refused by guardrail: {verdict.reason_code}",
                 guardrail=verdict.guardrail,
                 phase=str(verdict.phase),
             )
+            error.state = state
+            raise error
 
 
 class GuardrailChain:

@@ -11,6 +11,12 @@ versions. Their compatibility rules are specified separately.
 ## [Unreleased]
 
 ### Changed
+- A request that ends by exception now carries its state on the exception (set by the engine),
+  and `Platform.answer` publishes, counts and traces every outcome through one finish step. A
+  request that abstained after the retrieval screen dropped groups used to lose those security
+  events; it no longer does.
+- The HTTP layer no longer records its own span; the platform's `prag.request` trace replaces it.
+- The in-memory span buffer is bounded.
 - Guardrail verdicts that are security-relevant are published as events by
   `RequestState.with_verdict`, so no call site can record a block and forget the alert.
 - The graph engine re-raises `IsolationViolation` instead of treating it as a node failure; a
@@ -28,6 +34,18 @@ versions. Their compatibility rules are specified separately.
 - `httpx` is declared in the `dev` extra; FastAPI's test client needs it.
 
 ### Added
+- `observability.events`: an in-memory event bus. Every request publishes its accumulated events
+  once it has finished, whatever the outcome; a failing consumer never fails the publisher.
+- `observability.metrics`: declared metrics with enforced label sets, rendered in Prometheus
+  exposition format at `/metrics`.
+- `observability.tracing.request_spans`: one trace per request with the §16.1 span names, built
+  from the final state, and OTLP export with real timings and parenting (the `otel` extra).
+- `deploy/observability/`: Prometheus alert rules (isolation, canary and ACL-mismatch pages;
+  abstention, citation validity, degradation, latency, injection and cost tickets) and a Grafana
+  dashboard, tested against the declared metrics, labels and emitted reason codes.
+- `evaluation.judge`: an LLM faithfulness judge that records its provenance on every score and
+  grades the answer in a region with no instruction authority, plus `calibrate` against human
+  labels.
 - `guardrails`: input and output chains built from configured names (unknown names fail at
   startup, unimplemented ones are reported as deferred on `/health`); injection and
   instruction-override pattern families, PII detection with policy-gated redaction, payload

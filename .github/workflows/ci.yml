@@ -23,7 +23,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[api,dev]"
+        run: pip install -e ".[api,dev,otel]"
 
       - name: Lint
         run: ruff check src tests scripts

@@ -153,8 +153,20 @@ class GraphEngine:
                 )
 
     async def run(self, state: RequestState) -> GraphRun:
-        """Traverse the graph until a terminal node, an abstention, or the step cap."""
+        """Traverse the graph until a terminal node, an abstention, or the step cap.
+
+        A request that ends by exception carries the state it had reached on the exception's
+        ``state``, so the caller can still publish what it accumulated.
+        """
         run = GraphRun(state=state)
+        try:
+            return await self._traverse(run)
+        except PragError as exc:
+            if exc.state is None:
+                exc.state = run.state
+            raise
+
+    async def _traverse(self, run: GraphRun) -> GraphRun:
         current: str | None = self._definition.entry_node
         fell_back_from: str | None = None
 

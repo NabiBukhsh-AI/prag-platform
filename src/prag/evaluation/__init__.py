@@ -5,6 +5,7 @@ The offline runner, the CI regression gate and the online sampler all score with
 is the composition root's job (``prag.api.evaluation``).
 """
 
+from prag.evaluation.judge import DEFAULT_RUBRIC, LLMJudge, calibrate
 from prag.evaluation.metrics import (
     NOT_APPLICABLE,
     FunctionMetric,
@@ -31,14 +32,17 @@ from prag.evaluation.runner import (
 )
 
 __all__ = [
+    "DEFAULT_RUBRIC",
     "NOT_APPLICABLE",
     "FunctionMetric",
     "GateResult",
     "GoldenCase",
     "JudgeCalibration",
+    "LLMJudge",
     "MetricSummary",
     "Outcome",
     "Scorecard",
+    "calibrate",
     "coverage_at_k",
     "hit_rate_at_k",
     "load_cases",

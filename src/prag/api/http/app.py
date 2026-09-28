@@ -19,7 +19,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from prag.api.composition import Platform
@@ -27,7 +27,6 @@ from prag.api.middleware import resolve_principal, to_response
 from prag.api.sse import SseEvent, error_frame, format_sse
 from prag.core.errors import AbstentionRequired, PragError
 from prag.core.models.state import RequestState
-from prag.observability.tracing import SpanAttr
 
 __all__ = ["AnswerRequest", "IngestRequest", "build_app"]
 
@@ -99,45 +98,31 @@ def build_app(platform: Platform) -> FastAPI:
         if body.stream:
             return StreamingResponse(_stream(platform, state), media_type="text/event-stream")
 
-        with platform.tracer.span(
-            "http.answer",
-            **{
-                SpanAttr.REQUEST_ID: state.request_id,
-                SpanAttr.TRACE_ID: state.trace_id,
-                SpanAttr.TENANT_ID: state.principal.tenant_id,
-                SpanAttr.SLA_TIER: str(state.principal.sla_tier),
-            },
-        ) as span:
-            try:
-                run = await platform.answer(state)
-            except AbstentionRequired as exc:
-                # An abstention is a 200 carrying an envelope. A 4xx would make the abstention
-                # rate indistinguishable from client error in every dashboard that groups by
-                # status, and abstention rate is a metric with both an upper and a lower alert.
-                span.attributes[SpanAttr.ABSTAINED] = True
-                span.attributes[SpanAttr.ABSTENTION_REASON] = exc.abstention_code
-                return JSONResponse(status_code=200, content=_abstention_envelope(state, exc))
-            except PragError as exc:
-                span.attributes[SpanAttr.ERROR_REASON_CODE] = exc.reason_code
-                response = to_response(exc)
-                return JSONResponse(status_code=response.status, content=response.as_dict())
+        # Tracing, metrics and events are recorded by the platform, for every outcome, so the
+        # endpoint only maps the outcome to a response.
+        try:
+            run = await platform.answer(state)
+        except AbstentionRequired as exc:
+            # An abstention is a 200 carrying an envelope. A 4xx would make the abstention
+            # rate indistinguishable from client error in every dashboard that groups by
+            # status, and abstention rate is a metric with both an upper and a lower alert.
+            return JSONResponse(status_code=200, content=_abstention_envelope(state, exc))
+        except PragError as exc:
+            response = to_response(exc)
+            return JSONResponse(status_code=response.status, content=response.as_dict())
 
-            envelope = run.state.result
-            if envelope is None:  # pragma: no cover - the graph guarantees a terminal write
-                response = to_response(RuntimeError("graph produced no envelope"))
-                return JSONResponse(status_code=response.status, content=response.as_dict())
+        envelope = run.state.result
+        if envelope is None:  # pragma: no cover - the graph guarantees a terminal write
+            response = to_response(RuntimeError("graph produced no envelope"))
+            return JSONResponse(status_code=response.status, content=response.as_dict())
+        return JSONResponse(status_code=200, content=envelope.model_dump(mode="json"))
 
-            span.attributes.update(
-                {
-                    SpanAttr.MODEL_ID: envelope.diagnostics.model_id,
-                    SpanAttr.GROUNDEDNESS: envelope.grounding.groundedness,
-                    SpanAttr.CLAIMS_UNSOURCED: envelope.grounding.claims_unsourced,
-                    SpanAttr.BUDGET_DEGRADATION_LEVEL: envelope.diagnostics.degradation_level,
-                    SpanAttr.USD_COST: envelope.diagnostics.usd_cost,
-                    SpanAttr.ABSTAINED: envelope.abstained,
-                }
-            )
-            return JSONResponse(status_code=200, content=envelope.model_dump(mode="json"))
+    @app.get("/metrics")
+    async def metrics() -> PlainTextResponse:
+        """Prometheus exposition. Unauthenticated by convention, so it carries no content."""
+        return PlainTextResponse(
+            platform.metrics.render(), media_type="text/plain; version=0.0.4"
+        )
 
     @app.post("/v1/ingest")
     async def ingest(body: IngestRequest, request: Request) -> Any:

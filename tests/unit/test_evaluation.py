@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import ClassVar
 
 import pytest
 
@@ -248,6 +249,98 @@ class TestJudgeCalibration:
         for i in range(60):
             judge.record(0.95, i % 2 == 0)  # always confident, right half the time
         assert not judge.calibrated()
+
+
+class TestLLMJudge:
+    @staticmethod
+    def a_judge(response: str):
+        from prag.core.models.generation import ModelSpec
+        from prag.evaluation import LLMJudge
+        from tests.fakes.providers import RecordedLLMProvider
+
+        provider = RecordedLLMProvider(default_response=response)
+        spec = ModelSpec(
+            model_id="large.reasoning",
+            model_version="7",
+            provider_id="fake.recorded",
+            profile="judge",
+            context_window=32_000,
+            cost_per_1k_in=0.0,
+            cost_per_1k_out=0.0,
+        )
+        return LLMJudge(provider, spec), provider
+
+    GRADABLE: ClassVar[dict[str, object]] = {
+        "answer": "Retained for 30 days.",
+        "evidence_texts": ("Records: 30 days.",),
+    }
+
+    async def test_a_score_carries_the_judges_provenance(self) -> None:
+        """A judge score whose provenance is unknown cannot be recalibrated."""
+        judge, _ = self.a_judge("All supported.\nSCORE: 0.8")
+        result = await judge.score(a_sample(**self.GRADABLE))
+
+        assert result.score == 0.8
+        assert (result.judge_model, result.judge_version) == ("large.reasoning", "7")
+
+    async def test_the_last_score_line_wins(self) -> None:
+        judge, _ = self.a_judge("Earlier I thought SCORE: 0.2, but on reflection\nSCORE: 0.9")
+        assert (await judge.score(a_sample(**self.GRADABLE))).score == 0.9
+
+    @pytest.mark.parametrize("response", ["looks fine to me", "SCORE: 7", "SCORE: high"])
+    async def test_unparseable_output_is_excluded_not_zero(self, response: str) -> None:
+        """Scoring the answer zero would grade it for the judge's failure."""
+        judge, _ = self.a_judge(response)
+        assert (await judge.score(a_sample(**self.GRADABLE))).detail == NOT_APPLICABLE
+
+    async def test_the_answer_under_judgement_carries_no_authority(self) -> None:
+        """A model answer can carry an injection aimed at the judge."""
+        from prag.core.models.context import RegionName
+
+        judge, provider = self.a_judge("SCORE: 1")
+        seen = []
+        original = provider.generate
+
+        async def spy(request, deadline):
+            seen.append(request)
+            return await original(request, deadline)
+
+        provider.generate = spy
+        await judge.score(a_sample(**self.GRADABLE))
+
+        (request,) = seen
+        authority = {r.name: r.grants_instruction_authority for r in request.regions}
+        assert authority[RegionName.OUTPUT] is False
+        assert authority[RegionName.EVIDENCE] is False
+
+    async def test_nothing_to_grade_is_not_applicable(self) -> None:
+        judge, provider = self.a_judge("SCORE: 1")
+        result = await judge.score(a_sample(answer="x"))
+        assert result.detail == NOT_APPLICABLE
+        assert provider.generate_calls == 0
+
+    async def test_calibration_records_only_labelled_scorable_samples(self) -> None:
+        from prag.evaluation import calibrate
+
+        judge, _ = self.a_judge("SCORE: 0.9")
+        samples = [
+            a_sample("a", metadata={"human_faithful": True}, **self.GRADABLE),
+            a_sample("b", metadata={"human_faithful": False}, **self.GRADABLE),
+            a_sample("c", **self.GRADABLE),  # no human label
+        ]
+        calibration = await calibrate(judge, samples)
+
+        assert len(calibration.pairs) == 2
+        assert calibration.agreement() == 0.5
+
+    async def test_a_judged_metric_gates_nothing_until_calibrated(self) -> None:
+        judge, _ = self.a_judge("SCORE: 0.1")
+        card = await score_samples([judge], [a_sample(**self.GRADABLE)], dataset_id="d")
+
+        assert card.summaries["faithfulness.judge"].judged
+        assert regression_gate(card, floors={"faithfulness.judge": 0.9}).passed
+        gated = regression_gate(card, floors={"faithfulness.judge": 0.9}, judge_calibrated=True)
+        assert not gated.passed
 
 
 class TestDatasets:

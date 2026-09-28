@@ -87,6 +87,11 @@ class PragError(Exception):
         super().__init__(detail)
         self.detail = detail
         self.context: dict[str, Any] = context
+        #: The request state at the point the graph stopped, set by the engine when a request
+        #: ends by exception. Without it, everything the request accumulated before stopping —
+        #: including the security events of a retrieval screen that dropped groups — would be
+        #: discarded with the stack. Typed loosely because ``core.errors`` sits below the models.
+        self.state: Any = None
 
     def __str__(self) -> str:
         if not self.context:

@@ -49,11 +49,11 @@ Five decisions carry the design:
 
 ## Status
 
-**Phases 1 and 2 are complete; Phase 3's evaluation and guardrail core is in place.** The build order was followed strictly: `core/` first and in
-full, then the contract suites, then storage with in-memory fakes, then the graph engine, then
-vertical slices one at a time.
+**Phases 1, 2 and 3 are complete** — Phase 3 up to the items that need production traffic. The
+build order was followed strictly: `core/` first and in full, then the contract suites, then
+storage with in-memory fakes, then the graph engine, then vertical slices one at a time.
 
-**708 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
+**760 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
 evaluation gate passing on the seed golden and adversarial sets. CI runs all of it on every push
 and pull request, and every step blocks.
 
@@ -104,7 +104,7 @@ that Phase 2 traffic is meant to produce, and building it first would mean train
 data and calling the result empirical. The analyzer counts escalations, so the case for building
 them is measurable.
 
-### Phase 3 — in progress
+### Phase 3 — complete (except what needs production data)
 
 | Slice | What it delivers |
 |---|---|
@@ -116,17 +116,22 @@ them is measurable.
 | Regression gate | Floors from the evaluation config plus tolerance against a committed baseline; judge-scored metrics gate nothing until the judge is calibrated |
 | Datasets | Synthetic seed corpus with golden and adversarial sets (`eval/seed/`); real sets live in the private files repository |
 | Online sampling | Deterministic per-request sampling that publishes an evaluation event off the request path |
+| LLM judge | Faithfulness judge that records its model and version on every score, grades the answer in a region with no instruction authority, and excludes unparseable output rather than scoring it zero; `calibrate` measures its agreement with human labels |
+| Event bus | Every request publishes its events once it has finished, however it ended — including one that abstained after the screen dropped groups, whose security events used to be lost |
+| Tracing | One trace per request using the §16.1 span names, built from the final state; exported over OTLP with real timings and parenting when `observability.otel_endpoint` is set (`otel` extra) |
+| Metrics and alerts | Declared metrics exposed at `/metrics` for Prometheus; alert rules and a Grafana dashboard in `deploy/observability/`, tested so every metric, label and reason code they use actually exists |
 | CI | `.github/workflows/ci.yml`: lint, contracts, tests, adversarial suite, evaluation gate |
 
 The gate earned its place on its first run: it caught the local provider padding answers with
 off-topic sentences (citation precision 0.87 against a 0.95 floor), which is now fixed at the
 cause.
 
-Still to do for Phase 3: the LLM judge itself (the calibration tracking it must pass is built),
-an OpenTelemetry exporter with dashboards and alerts, an event bus so security events survive a
-request that ends in abstention, the tenant content-policy classifier and poisoning heuristics
-(both reported as deferred on `/health` rather than assumed covered), and the T1 classifier,
-which needs labels from real traffic.
+Waiting on production data rather than code: the T1 classifier (needs labels from real traffic),
+the judge-versus-human calibration report (needs human labels; the calibration it would report is
+built and gates the judge), the tenant content-policy classifier, and poisoning heuristics (need
+per-source embedding distributions). The last two are reported as deferred on `/health` rather
+than assumed covered. Evidence-utilization, adapter and calibration-drift alerts arrive with the
+phases that produce those signals; `alerts.yml` lists them.
 
 ### Later phases
 
@@ -167,6 +172,8 @@ src/prag/
   storage/         repositories, no business logic
   config/          the configuration contract and its layering
   workers/         ingestion, training, evaluation, maintenance
+eval/seed/         synthetic corpus, golden and adversarial sets, committed baselines
+deploy/            Prometheus alert rules and the Grafana dashboard
 ```
 
 Dependency direction is enforced by `importlinter.ini`, not by convention. `core` imports

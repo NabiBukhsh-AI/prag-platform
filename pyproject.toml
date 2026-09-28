@@ -62,6 +62,12 @@ storage = [
     "asyncpg>=0.29",
     "redis>=5.0",
 ]
+# Trace export. Optional: without it the platform records in memory and exports nothing, and
+# configuring an OTLP endpoint without it fails at startup rather than silently dropping traces.
+otel = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

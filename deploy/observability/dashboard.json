@@ -1,0 +1,96 @@
+{
+  "title": "prag — request path",
+  "uid": "prag-request-path",
+  "schemaVersion": 39,
+  "tags": ["prag"],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Requests by outcome",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum by (outcome) (rate(prag_requests_total[5m]))", "legendFormat": "{{outcome}}" }
+      ]
+    },
+    {
+      "title": "End-to-end latency (p50 / p95)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum by (le) (rate(prag_request_duration_ms_bucket[5m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(prag_request_duration_ms_bucket[5m])))", "legendFormat": "p95" }
+      ]
+    },
+    {
+      "title": "Node latency p95",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, node) (rate(prag_node_duration_ms_bucket[5m])))", "legendFormat": "{{node}}" }
+      ]
+    },
+    {
+      "title": "Abstention rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [
+        { "expr": "sum(rate(prag_requests_total{outcome=\"abstained\"}[10m])) / sum(rate(prag_requests_total[10m]))", "legendFormat": "abstained" }
+      ]
+    },
+    {
+      "title": "Guardrail verdicts by reason",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum by (phase, reason) (rate(prag_guardrail_verdicts_total[5m]))", "legendFormat": "{{phase}} {{reason}}" }
+      ]
+    },
+    {
+      "title": "Security events and isolation alerts",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum by (kind) (increase(prag_security_events_total[24h]))", "legendFormat": "{{kind}}" }
+      ]
+    },
+    {
+      "title": "Cost per request by tenant",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "targets": [
+        { "expr": "sum by (tenant) (rate(prag_cost_usd_total[1h])) / sum by (tenant) (rate(prag_requests_total[1h]))", "legendFormat": "{{tenant}}" }
+      ]
+    },
+    {
+      "title": "Degradation level share",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [
+        { "expr": "sum by (level) (rate(prag_degradation_total[10m])) / ignoring(level) group_left sum(rate(prag_degradation_total[10m]))", "legendFormat": "level {{level}}" }
+      ]
+    }
+  ]
+}

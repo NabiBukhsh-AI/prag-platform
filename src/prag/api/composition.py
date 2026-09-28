@@ -13,11 +13,12 @@ building the world.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from prag.context import RegionContextBuilder, RegionPromptRenderer
 from prag.core.di import Container
+from prag.core.errors import AbstentionRequired, GuardrailBlocked, IsolationViolation, PragError
 from prag.core.ids import new_id
 from prag.core.models.common import Deadline, GuardrailPhase
 from prag.core.models.events import DomainEvent, EventKind
@@ -35,7 +36,13 @@ from prag.ingestion import index_chunks, normalize_markdown, validate_chunks
 from prag.ingestion.chunking import default_registry
 from prag.ingestion.embedding import HashingEmbeddingProvider
 from prag.intelligence import CascadeQueryAnalyzer, UtilityStrategyRouter
-from prag.observability.tracing import TraceRecorder
+from prag.observability import (
+    InMemoryEventBus,
+    Metrics,
+    TraceRecorder,
+    record_request,
+    request_spans,
+)
 from prag.orchestration import (
     AbstainNode,
     AnalyzeNode,
@@ -87,6 +94,54 @@ _USD_BY_TIER: dict[str, float] = {
 }
 
 
+def _event(state: RequestState, kind: EventKind, **payload: object) -> DomainEvent:
+    return DomainEvent(
+        event_id=new_id("evt"),
+        kind=kind,
+        request_id=state.request_id,
+        tenant_id=state.principal.tenant_id,
+        occurred_at_ms=int(time.time() * 1000),
+        payload=payload,
+    )
+
+
+def _otel_tracer(endpoint: str | None) -> object | None:
+    """An OTLP/HTTP tracer when an endpoint is configured, else nothing.
+
+    A configured endpoint without the ``otel`` extra installed fails the process. Starting up
+    and silently exporting nothing would look exactly like a quiet system.
+    """
+    if not endpoint:
+        return None
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError as exc:
+        from prag.core.errors import ConfigurationError
+
+        raise ConfigurationError(
+            "observability.otel_endpoint is set but the otel extra is not installed",
+            hint='pip install "prag[otel]"',
+        ) from exc
+
+    provider = TracerProvider(resource=Resource.create({"service.name": "prag"}))
+    # Batched, so export happens on a background thread rather than on the request path.
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+    return provider.get_tracer("prag")
+
+
+def _outcome_of(exc: PragError) -> str:
+    if isinstance(exc, AbstentionRequired):
+        return "abstained"
+    if isinstance(exc, GuardrailBlocked):
+        return "blocked"
+    if isinstance(exc, IsolationViolation):
+        return "isolation_violation"
+    return "error"
+
+
 @dataclass(slots=True)
 class Platform:
     """Everything a request needs, wired and ready.
@@ -104,6 +159,8 @@ class Platform:
     embedder: object
     lexical_index: InMemoryLexicalIndex
     guardrails: GuardrailSet
+    events: InMemoryEventBus = field(default_factory=InMemoryEventBus)
+    metrics: Metrics = field(default_factory=Metrics)
     collection: str = "chunks"
 
     def request_state(self, query: str, headers: dict[str, str]) -> RequestState:
@@ -137,7 +194,41 @@ class Platform:
         )
 
     async def answer(self, state: RequestState) -> GraphRun:
-        """Run one request through the input chain, the graph, and the output chain.
+        """Run one request, then publish, count and trace it however it ended.
+
+        Every ending goes through the same finish step — answered, abstained, blocked, an
+        isolation violation, or an error. A request that raised still publishes the events it
+        accumulated (the engine hands its state back on the exception), so a retrieval screen
+        that dropped groups before an abstention is still heard by the audit store.
+        """
+        started_ms, started = int(time.time() * 1000), time.monotonic()
+        try:
+            run = await self._guarded(state)
+        except PragError as exc:
+            final = exc.state if exc.state is not None else state
+            if isinstance(exc, IsolationViolation):
+                # Raised before any verdict could be recorded, so the alert is added here.
+                final = final.with_event(
+                    _event(final, EventKind.ISOLATION_ALERT, reason_code=exc.reason_code)
+                )
+            self._finish(final, _outcome_of(exc), started_ms, started)
+            raise
+
+        result = run.state.result
+        outcome = "abstained" if result is None or result.abstained else "answered"
+        self._finish(run.state, outcome, started_ms, started)
+        return run
+
+    def _finish(self, state: RequestState, outcome: str, started_ms: int, started: float) -> None:
+        elapsed = int((time.monotonic() - started) * 1000)
+        self.events.publish(state.events)
+        record_request(self.metrics, state, outcome=outcome, elapsed_ms=elapsed)
+        self.tracer.record_trace(
+            request_spans(state, outcome=outcome, started_at_ms=started_ms, elapsed_ms=elapsed)
+        )
+
+    async def _guarded(self, state: RequestState) -> GraphRun:
+        """The input chain, the graph, and the output chain.
 
         The chains wrap the graph rather than being nodes in it: guardrails are middleware,
         and every graph a request might take gets the same ones. Retrieval-phase checks run
@@ -155,7 +246,7 @@ class Platform:
         )
         for verdict in inbound.verdicts:
             state = state.with_verdict(verdict)
-        inbound.raise_if_blocked()
+        inbound.raise_if_blocked(state)
         state = state.advanced(raw_query=inbound.payload.query or state.raw_query)
 
         run = await self.engine.run(state)
@@ -180,7 +271,7 @@ class Platform:
         final = run.state
         for verdict in outbound.verdicts:
             final = final.with_verdict(verdict)
-        outbound.raise_if_blocked()
+        outbound.raise_if_blocked(final)
         if outbound.payload.answer != envelope.answer:
             final = final.advanced(
                 result=envelope.model_copy(update={"answer": outbound.payload.answer or ""})
@@ -189,15 +280,7 @@ class Platform:
             # Published, not scored here. The inline heuristics and the asynchronous judge run
             # off the request path; a request that waits for its own evaluation has made
             # evaluation a latency cost.
-            final = final.with_event(
-                DomainEvent(
-                    event_id=new_id("evt"),
-                    kind=EventKind.EVAL_SAMPLED,
-                    request_id=final.request_id,
-                    tenant_id=final.principal.tenant_id,
-                    occurred_at_ms=int(time.time() * 1000),
-                )
-            )
+            final = final.with_event(_event(final, EventKind.EVAL_SAMPLED))
         run.state = final
         return run
 
@@ -272,7 +355,7 @@ def build_platform(
     the only file that changes.
     """
     container = Container()
-    tracer = TraceRecorder()
+    tracer = TraceRecorder(otel_tracer=_otel_tracer(settings.observability.otel_endpoint))
 
     store = InMemoryVectorStore(dimensions=embedding_dimensions)
     # Hashing rather than a real embedding model, which is what keeps the local stack free of
