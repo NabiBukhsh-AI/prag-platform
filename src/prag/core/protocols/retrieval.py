@@ -17,6 +17,7 @@ from prag.core.models.common import (
     SourceCapabilities,
 )
 from prag.core.models.identity import Budget, Principal
+from prag.core.models.query import QueryAnalysis, QueryVariants
 from prag.core.models.retrieval import (
     CandidatePool,
     FilterExpr,
@@ -31,6 +32,7 @@ __all__ = [
     "KnowledgeSource",
     "LexicalStore",
     "RetrievalOrchestrator",
+    "RetrievalPlanner",
     "VectorStore",
 ]
 
@@ -152,3 +154,29 @@ class LexicalStore(Protocol):
     ) -> Sequence[ScoredPoint]: ...
 
     async def delete(self, index: str, ids: Sequence[str]) -> None: ...
+
+
+@runtime_checkable
+class RetrievalPlanner(Protocol):
+    """Turns a query analysis into an executable retrieval plan.
+
+    A protocol rather than a function import, so orchestration depends on the capability and not
+    on the retrieval package. The plan it returns is a record of a decision — loggable, diffable
+    against what a different router would have produced, and replayable offline against a
+    recorded analysis without touching an index.
+    """
+
+    def plan(
+        self,
+        analysis: QueryAnalysis,
+        variants: QueryVariants,
+        *,
+        wall_ms: int | None = None,
+    ) -> RetrievalPlan:
+        """Build the plan. Synchronous and pure.
+
+        Must decide which legs are required. A failed optional leg is a coverage warning; a
+        failed required leg is a plan failure. Marking everything required removes the ability
+        to degrade, and marking nothing required removes the ability to notice that it has.
+        """
+        ...

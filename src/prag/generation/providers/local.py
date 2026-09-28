@@ -78,10 +78,12 @@ class LocalExtractiveProvider:
         provider_id: str = "local.extractive",
         max_sentences: int = 3,
         min_overlap: float = 0.15,
+        relative_floor: float = 0.6,
     ) -> None:
         self.provider_id = provider_id
         self._max_sentences = max_sentences
         self._min_overlap = min_overlap
+        self._relative_floor = relative_floor
         self.generate_calls = 0
 
     def supports(self, spec: ModelSpec) -> bool:
@@ -183,7 +185,16 @@ class LocalExtractiveProvider:
         # Sorted by score, then by text, so the same context always produces the same answer.
         # Recorded-state replay and every content assertion depend on it.
         scored.sort(key=lambda item: (-item[0], item[1]))
-        return " ".join(sentence for _, sentence in scored[: self._max_sentences])
+
+        # Relative to the best match, not only an absolute floor. Against a four-word question a
+        # single shared word clears any absolute floor, and the answer gets padded with a
+        # sentence that merely mentions "target" — which the evaluation gate caught as citations
+        # to documents that do not answer the question.
+        # ponytail: one relevance cut for the whole answer, so a two-aspect question can lose its
+        # weaker aspect; a real model replaces this provider before that matters.
+        cutoff = scored[0][0] * self._relative_floor
+        kept = [sentence for score, sentence in scored if score >= cutoff]
+        return " ".join(kept[: self._max_sentences])
 
     async def health(self) -> HealthStatus:
         return HealthStatus(

@@ -75,11 +75,13 @@ from prag.core.models.generation import (
     GroundingReport,
     ModelSpec,
     TokenUsage,
+    ToolCall,
     ToolSchema,
 )
 from prag.core.models.guardrails import (
     GuardrailPayload,
     GuardrailVerdict,
+    ScreenResult,
     VerdictAction,
 )
 from prag.core.models.identity import Budget, Principal, TenantPolicy, UtilityWeights
@@ -255,6 +257,7 @@ __all__ = [
     "RetrievalPlan",
     "SafetyPreflags",
     "ScoredPoint",
+    "ScreenResult",
     "SessionContext",
     "SessionSummary",
     "SlaTier",
@@ -272,6 +275,7 @@ __all__ = [
     "Temporality",
     "TenantPolicy",
     "TokenUsage",
+    "ToolCall",
     "ToolSchema",
     "UtilityWeights",
     "ValidationAction",

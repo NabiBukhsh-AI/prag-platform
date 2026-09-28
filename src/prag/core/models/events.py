@@ -155,6 +155,9 @@ class EvalSample(BaseModel):
     query: str
     reference_answer: str | None = None
     relevant_document_ids: tuple[str, ...] = ()
+    #: Document ids as retrieved, best first. What the retrieval metrics rank against
+    #: ``relevant_document_ids``.
+    retrieved_document_ids: tuple[str, ...] = ()
     answer: str | None = None
     evidence_texts: tuple[str, ...] = ()
     citations: tuple[str, ...] = ()

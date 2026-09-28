@@ -56,6 +56,10 @@ class ChunkMetadata(BaseModel):
     updated_at_ms: int
     #: Opaque ACL hash. Compared against the principal's set by the independent recheck.
     acl_hash: str
+    #: The tenant the index says owns this chunk. Carried so the ACL recheck can verify it
+    #: without trusting the filter that produced it; ``None`` means the index predates the
+    #: field, and the recheck treats an unverifiable owner as a mismatch.
+    tenant_id: str | None = None
     volatility_class: VolatilityClass = VolatilityClass.SLOW
     #: Identity of the original document this chunk ultimately derives from. Two chunks sharing
     #: a lineage root are not independent evidence, however different their text looks, and the

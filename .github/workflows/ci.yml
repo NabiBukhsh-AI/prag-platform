@@ -1,0 +1,45 @@
+# What every push and pull request must pass. Each step is blocking: a contract, test, adversarial
+# or evaluation failure fails the build rather than posting a warning nobody reads.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[api,dev]"
+
+      - name: Lint
+        run: ruff check src tests scripts
+
+      - name: Dependency contracts
+        run: lint-imports --config importlinter.ini
+
+      - name: Unit, contract, integration and e2e tests
+        run: pytest tests -q --ignore=tests/adversarial
+
+      # Separate from the rest so a failure reads as "an attack got through", not as one red
+      # test among hundreds.
+      - name: Adversarial suite
+        run: pytest tests/adversarial -q
+
+      # The regression gate: floors from the evaluation config, and no metric may regress past
+      # tolerance from the committed baseline in eval/seed/baselines/.
+      - name: Evaluation gate
+        run: python scripts/run_eval.py

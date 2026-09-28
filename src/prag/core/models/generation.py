@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from prag.core.models.context import CoverageWarning, RenderedRegion
+from prag.core.models.context import CoverageWarning, RegionName, RenderedRegion
 from prag.core.models.fusion import (
     Abstention,
     ConfidenceBlock,
@@ -35,6 +35,7 @@ __all__ = [
     "GroundingReport",
     "ModelSpec",
     "TokenUsage",
+    "ToolCall",
     "ToolSchema",
 ]
 
@@ -85,6 +86,23 @@ class ToolSchema(BaseModel):
     #: Side-effecting tools are held to a stricter standard than read-only ones, because a
     #: wrongly authorised read is a leak and a wrongly authorised write is a change.
     has_side_effects: bool = False
+
+
+class ToolCall(BaseModel):
+    """A tool invocation, tagged with what caused it.
+
+    ``origin_region`` is the provenance tag. It is set from the provider's attribution of the
+    call to a prompt region, never parsed from the model's own text: a model fooled by a
+    document will happily write that the user asked for it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    #: ``None`` when the provider could not attribute the call, which the gate treats as
+    #: unauthorised rather than as unknown-therefore-fine.
+    origin_region: RegionName | None = None
 
 
 class GenerationRequest(BaseModel):

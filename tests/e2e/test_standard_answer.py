@@ -19,7 +19,7 @@ from prag.core.ids import new_request_id, new_trace_id
 from prag.core.models.common import Deadline
 from prag.core.models.identity import Budget, Principal, TenantPolicy, UtilityWeights
 from prag.core.models.state import RequestState
-from prag.evidence import CandidateGrouper
+from prag.evidence import CandidateGrouper, LexicalOverlapReranker
 from prag.generation import (
     HeuristicGroundingVerifier,
     LocalExtractiveProvider,
@@ -28,6 +28,7 @@ from prag.generation import (
 )
 from prag.ingestion import index_chunks, normalize_markdown, validate_chunks
 from prag.ingestion.chunking import StructureAwareChunker
+from prag.intelligence import CascadeQueryAnalyzer, UtilityStrategyRouter
 from prag.orchestration import (
     AbstainNode,
     AnalyzeNode,
@@ -37,7 +38,14 @@ from prag.orchestration import (
     RetrieveNode,
     standard_answer_graph,
 )
-from prag.retrieval import VectorKnowledgeSource
+from prag.retrieval import (
+    InMemoryLexicalIndex,
+    LexicalKnowledgeSource,
+    ParallelRetrievalOrchestrator,
+    SourcePlanner,
+    SourceSpec,
+    VectorKnowledgeSource,
+)
 from prag.storage.vectorstore import InMemoryVectorStore
 from tests.fakes.providers import DeterministicEmbeddingProvider
 
@@ -81,6 +89,7 @@ async def build_engine(
     """Wire the whole Phase-1 stack over an in-memory store."""
     store = InMemoryVectorStore()
     embedder = DeterministicEmbeddingProvider(dimensions=64)
+    lexical_index = InMemoryLexicalIndex()
 
     if seed:
         document = normalize_markdown(
@@ -101,11 +110,25 @@ async def build_engine(
             collection="chunks",
             deadline=Deadline.in_ms(5_000, label="seed"),
         )
+        # Both indexes from the same chunks, in one pass. Writing them separately is how they
+        # drift, and a document in one but not the other degrades exactly the queries the
+        # missing index served.
+        from prag.ingestion.indexing import build_payload
+
+        lexical_index.index([build_payload(chunk, embedding_version="lexical") for chunk in chunks])
     else:
         store.create_collection("chunks", dimensions=64)
 
-    source = VectorKnowledgeSource(
+    vector_source = VectorKnowledgeSource(
         source_id="vector.primary", store=store, embedder=embedder, collection="chunks"
+    )
+    lexical_source = LexicalKnowledgeSource(source_id="lexical.primary", index=lexical_index)
+    orchestrator = ParallelRetrievalOrchestrator(
+        {"vector.primary": vector_source, "lexical.primary": lexical_source}
+    )
+    source_specs = (
+        SourceSpec("vector.primary", vector_source.capabilities, required=True),
+        SourceSpec("lexical.primary", lexical_source.capabilities, required=False),
     )
     router = PolicyModelRouter(
         {
@@ -124,8 +147,17 @@ async def build_engine(
     return GraphEngine(
         standard_answer_graph(),
         {
-            "analyze": AnalyzeNode(),
-            "retrieve": RetrieveNode(source, CandidateGrouper()),
+            "analyze": AnalyzeNode(
+                CascadeQueryAnalyzer(),
+                UtilityStrategyRouter(parametric_available=False),
+            ),
+            "retrieve": RetrieveNode(
+                SourcePlanner(source_specs, top_k=8, wall_ms=2_000),
+                orchestrator,
+                CandidateGrouper(),
+                reranker=LexicalOverlapReranker(),
+                wall_ms=2_000,
+            ),
             "build_context": BuildContextNode(
                 RegionContextBuilder(system_prompt=SYSTEM_PROMPT, max_evidence_tokens=4_000),
                 router,
@@ -375,3 +407,52 @@ class TestDegradation:
         assert envelope is not None
         assert envelope.diagnostics.degradation_level >= 0
         assert envelope.diagnostics.degradation_level == run.state.budget.degradation_level
+
+
+class TestHybridRetrieval:
+    """Both sources contribute, and each covers the other's blind spot."""
+
+    async def test_both_sources_are_planned(self) -> None:
+        engine = await build_engine()
+        run = await engine.run(a_state("how quickly must a sev-1 be escalated"))
+
+        plan = run.state.plan
+        assert plan is not None
+        assert {leg.source_id for leg in plan.legs} == {"vector.primary", "lexical.primary"}
+
+    async def test_the_lexical_leg_gets_a_term_variant(self) -> None:
+        """BM25 matches terms, so it wants the expansion the dense leg would find noisy."""
+        engine = await build_engine()
+        run = await engine.run(a_state("what is the sev-1 escalation target"))
+
+        plan = run.state.plan
+        assert plan is not None
+        lexical = next(leg for leg in plan.legs if leg.source_id == "lexical.primary")
+        dense = next(leg for leg in plan.legs if leg.source_id == "vector.primary")
+        assert lexical.query_variant in {"expanded", "entities_only", "rewritten", "raw"}
+        assert dense.query_variant in {"rewritten", "coreference_resolved", "raw"}
+
+    async def test_an_optional_source_failing_does_not_fail_the_request(self) -> None:
+        """Lexical is optional, so an empty index costs recall rather than the answer."""
+        engine = await build_engine()
+        run = await engine.run(a_state("how quickly must a sev-1 be escalated"))
+        assert run.completed
+
+    async def test_the_strategy_decision_is_recorded(self) -> None:
+        """A trace showing only the winner cannot answer "why didn't it retrieve"."""
+        engine = await build_engine()
+        run = await engine.run(a_state("what is our escalation policy"))
+
+        strategy = run.state.strategy
+        assert strategy is not None
+        assert strategy.eliminated, "the parametric route is unavailable and says why"
+        assert strategy.utility_scores
+
+    async def test_query_variants_are_produced(self) -> None:
+        engine = await build_engine()
+        run = await engine.run(a_state("please compare sev-1 and sev-2 response targets"))
+
+        variants = run.state.variants
+        assert variants is not None
+        assert variants.raw
+        assert variants.sub_queries or variants.expanded or variants.rewritten

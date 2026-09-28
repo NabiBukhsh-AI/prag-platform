@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels prag[api] \
  && rm -rf /wheels
 
 COPY scripts ./scripts
+# The synthetic seed corpus and evaluation sets. Real golden and adversarial sets live in the
+# private files repository and are mounted, never baked into an image.
+COPY eval/seed ./eval/seed
 
 USER prag
 EXPOSE 8080

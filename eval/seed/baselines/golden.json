@@ -1,0 +1,65 @@
+{
+  "dataset_id": "seed.golden",
+  "summaries": {
+    "abstention_correct": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 11,
+      "pass_rate": 1.0
+    },
+    "citation_precision": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 10,
+      "pass_rate": 1.0
+    },
+    "completeness": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 9,
+      "pass_rate": 1.0
+    },
+    "coverage@5": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 1,
+      "pass_rate": null
+    },
+    "groundedness": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 10,
+      "pass_rate": 1.0
+    },
+    "hit_rate@5": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 10,
+      "pass_rate": null
+    },
+    "mrr": {
+      "judged": false,
+      "mean": 0.95,
+      "n": 10,
+      "pass_rate": null
+    },
+    "ndcg@5": {
+      "judged": false,
+      "mean": 0.9630929753571458,
+      "n": 10,
+      "pass_rate": null
+    },
+    "precision@5": {
+      "judged": false,
+      "mean": 0.5333333333333333,
+      "n": 10,
+      "pass_rate": null
+    },
+    "recall@5": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 10,
+      "pass_rate": null
+    }
+  }
+}

@@ -632,6 +632,32 @@ class TestFailureHandling:
         with pytest.raises(AbstentionRequired):
             await engine.run(state)
 
+    async def test_an_isolation_violation_never_takes_the_fallback(
+        self, state: RequestState
+    ) -> None:
+        """A fallback would answer from whatever is left of a request that crossed a tenant."""
+        from prag.core.errors import IsolationViolation
+
+        answer = ToyNode("answer")
+        engine = GraphEngine(
+            two_node_graph(
+                edges=(
+                    Edge(from_node="analyze", to_node="answer"),
+                    Edge(from_node="analyze", to_node="answer", kind="fallback"),
+                )
+            ),
+            {
+                "analyze": ToyNode(
+                    "analyze",
+                    raises=IsolationViolation("canary sighted"),
+                    fallback_node="answer",
+                ),
+                "answer": answer,
+            },
+        )
+        with pytest.raises(IsolationViolation):
+            await engine.run(state)
+
 
 class TestBudgetIntegration:
     def _tight(self, state: RequestState, remaining: int) -> RequestState:

@@ -75,6 +75,7 @@ def payload_to_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "parent_text": payload.get("parent_text"),
         "heading_path": tuple(payload.get("heading_path", ())),
         "acl_hash": payload.get("acl_hash", "public"),
+        "tenant_id": payload.get("tenant_id"),
         "authority": float(payload.get("authority", 0.5)),
         "lineage_root": payload.get("lineage_root") or payload.get("document_id", ""),
         "embedding_version": payload.get("embedding_version"),

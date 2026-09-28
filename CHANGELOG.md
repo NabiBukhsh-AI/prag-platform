@@ -10,7 +10,53 @@ versions. Their compatibility rules are specified separately.
 
 ## [Unreleased]
 
+### Changed
+- Guardrail verdicts that are security-relevant are published as events by
+  `RequestState.with_verdict`, so no call site can record a block and forget the alert.
+- The graph engine re-raises `IsolationViolation` instead of treating it as a node failure; a
+  fallback must never answer from what is left of a request that crossed a tenant boundary.
+- `Platform.answer` wraps the graph in the input and output chains; the HTTP endpoints, the seed
+  script and the evaluation runner all use it. `Platform.request_state` replaces the HTTP
+  module's private state builder, so nothing outside HTTP needs a web framework.
+- The seed documents moved to `eval/seed/corpus/` and are shared by the seed script, the golden
+  set and the adversarial suite.
+
+### Fixed
+- The local extractive provider padded answers with sentences sharing a single word with the
+  query. It now keeps only sentences within a relative margin of the best match; the evaluation
+  gate caught this as citation precision 0.87 against a 0.95 floor.
+- `httpx` is declared in the `dev` extra; FastAPI's test client needs it.
+
 ### Added
+- `guardrails`: input and output chains built from configured names (unknown names fail at
+  startup, unimplemented ones are reported as deferred on `/health`); injection and
+  instruction-override pattern families, PII detection with policy-gated redaction, payload
+  limits, citation validation, and leakage detection for secrets, exfiltration-shaped URLs and
+  foreign canaries. The chain fails closed when a guardrail raises.
+- `guardrails.screen`: the retrieval-phase `EvidenceScreen` — canary sighting fails the request,
+  an ACL recheck that re-verifies tenant and ACL per member, source quarantine, and
+  document-borne injection detection over child and parent text.
+- `guardrails.tools`: a provenance-gated tool executor that refuses calls attributed to the
+  evidence region, to no region, or to a region the request never rendered.
+- `evaluation`: one implementation of every metric (retrieval, coverage@k, groundedness,
+  citation precision, completeness, abstention, adversarial outcome), scorecards, a regression
+  gate with floors and baseline tolerance, deterministic online sampling, and judge calibration
+  tracking; uncalibrated judge metrics gate nothing.
+- `eval/seed/`: a synthetic corpus with golden and adversarial sets and committed baselines, and
+  `scripts/run_eval.py`, whose exit code is the CI gate.
+- `.github/workflows/ci.yml`: lint, dependency contracts, tests, the adversarial suite and the
+  evaluation gate, all blocking.
+- `core`: `EvidenceScreen` protocol, `ScreenResult` and `ToolCall` models,
+  `ChunkMetadata.tenant_id`, and `EvalSample.retrieved_document_ids`.
+- `intelligence`: T0 rules classifier, cascade query analyzer, two-stage strategy router (hard
+  constraints, then expected utility over an empirical quality table), and four gated,
+  budgeted query transforms.
+- `retrieval`: planner and `RetrievalPlanner` protocol, parallel orchestrator with per-leg
+  deadlines, partial-results policy and per-source circuit breaker, a BM25 lexical source, and
+  reciprocal rank fusion.
+- `evidence.rerankers`: skippable rerank tiers; the ladder's first rung.
+- `caching.keys`: key construction carrying tenant, ACL set, config and embedding versions, and
+  the never-cache rules enforced in one place.
 - `core`: 24 protocols, 112 domain models, the typed error hierarchy, the budget controller
   with its six-rung degradation ladder, monotonic deadlines, and the DI container.
 - Conformance suites for `KnowledgeSource`, `LLMProvider`, `EmbeddingProvider`, `MemoryStore`

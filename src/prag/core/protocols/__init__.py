@@ -27,6 +27,7 @@ from prag.core.protocols.evidence import (
     ContextValidator,
     EmbeddingProvider,
     EvidenceGrouper,
+    EvidenceScreen,
     PromptRenderer,
     Reranker,
 )
@@ -47,6 +48,7 @@ from prag.core.protocols.retrieval import (
     KnowledgeSource,
     LexicalStore,
     RetrievalOrchestrator,
+    RetrievalPlanner,
     VectorStore,
 )
 from prag.core.protocols.storage import (
@@ -69,6 +71,7 @@ __all__ = [
     "EvalRepository",
     "Evaluator",
     "EvidenceGrouper",
+    "EvidenceScreen",
     "Extractor",
     "FusionPolicy",
     "GraphNode",
@@ -87,6 +90,7 @@ __all__ = [
     "QueryTransformer",
     "Reranker",
     "RetrievalOrchestrator",
+    "RetrievalPlanner",
     "StrategyRouter",
     "TokenCounter",
     "VectorStore",

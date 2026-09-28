@@ -10,6 +10,12 @@ confident exactly where it is most wrong.
 """
 
 from prag.evidence.dedup import group_candidates, normalized_fingerprint, token_overlap
+from prag.evidence.rerankers import (
+    LexicalOverlapReranker,
+    NoOpReranker,
+    RerankOutcome,
+    rerank_with_budget,
+)
 
 __all__ = ["group_candidates", "normalized_fingerprint", "token_overlap"]
 
@@ -31,7 +37,11 @@ class CandidateGrouper:
 
 __all__ = [
     "CandidateGrouper",
+    "LexicalOverlapReranker",
+    "NoOpReranker",
+    "RerankOutcome",
     "group_candidates",
     "normalized_fingerprint",
+    "rerank_with_budget",
     "token_overlap",
 ]

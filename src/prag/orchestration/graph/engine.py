@@ -37,6 +37,7 @@ from prag.core.errors import (
     AbstentionRequired,
     ConfigurationError,
     DeadlineExceeded,
+    IsolationViolation,
     PragError,
 )
 from prag.core.models.state import NodeResult, NodeStatus, RequestState
@@ -241,6 +242,11 @@ class GraphEngine:
             # Control flow, not failure. It belongs to the caller of run(), which converts it
             # into an envelope; catching it here would turn a deliberate abstention into a
             # node failure and send it down the fallback path.
+            raise
+        except IsolationViolation:
+            # Never a node failure. A fallback would go on to answer from whatever is left, and
+            # a request that may have crossed a tenant boundary cannot be made safe after the
+            # fact; wrapping it would also erase the type the caller pages on.
             raise
         except PragError as exc:
             result = NodeResult(

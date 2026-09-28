@@ -1,0 +1,17 @@
+{
+  "dataset_id": "seed.adversarial",
+  "summaries": {
+    "adversarial": {
+      "judged": false,
+      "mean": 1.0,
+      "n": 10,
+      "pass_rate": 1.0
+    },
+    "groundedness": {
+      "judged": false,
+      "mean": 0.6666666666666666,
+      "n": 3,
+      "pass_rate": 0.6666666666666666
+    }
+  }
+}

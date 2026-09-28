@@ -26,27 +26,10 @@ from prag.api.composition import Platform
 from prag.api.middleware import resolve_principal, to_response
 from prag.api.sse import SseEvent, error_frame, format_sse
 from prag.core.errors import AbstentionRequired, PragError
-from prag.core.ids import new_request_id, new_trace_id
-from prag.core.models.identity import Budget
 from prag.core.models.state import RequestState
 from prag.observability.tracing import SpanAttr
 
 __all__ = ["AnswerRequest", "IngestRequest", "build_app"]
-
-#: Wall-clock budget per SLA tier. Interactive is tight because the design targets a 650 ms time
-#: to first token; batch is generous because nobody is waiting on it.
-_WALL_MS_BY_TIER: dict[str, int] = {
-    "interactive": 3_000,
-    "standard": 10_000,
-    "high_stakes": 30_000,
-    "batch": 120_000,
-}
-_USD_BY_TIER: dict[str, float] = {
-    "interactive": 0.02,
-    "standard": 0.05,
-    "high_stakes": 0.50,
-    "batch": 0.20,
-}
 
 
 class AnswerRequest(BaseModel):
@@ -67,29 +50,6 @@ class IngestRequest(BaseModel):
     source_id: str = "kb.seed"
     acl_hash: str = "public"
     authority: float = Field(default=0.8, ge=0.0, le=1.0)
-
-
-def _state_for(platform: Platform, query: str, headers: dict[str, str]) -> RequestState:
-    from prag.config import resolve_tenant_policy
-
-    principal = resolve_principal(headers)
-    tier = str(principal.sla_tier)
-    wall_ms = _WALL_MS_BY_TIER.get(tier, 10_000)
-
-    return RequestState(
-        request_id=new_request_id(),
-        trace_id=new_trace_id(),
-        principal=principal,
-        policy=resolve_tenant_policy(platform.settings, principal.tenant_id),
-        budget=Budget(
-            wall_ms_total=wall_ms,
-            wall_ms_remaining=wall_ms,
-            usd_total=_USD_BY_TIER.get(tier, 0.05),
-            max_tokens_in=platform.settings.context.max_evidence_tokens,
-            max_tokens_out=2_048,
-        ),
-        raw_query=query,
-    )
 
 
 def build_app(platform: Platform) -> FastAPI:
@@ -121,6 +81,9 @@ def build_app(platform: Platform) -> FastAPI:
             "config_version": platform.settings.config_version,
             "indexed_vectors": platform.store.count(platform.collection),
             "parametric_enabled": platform.settings.parametric.enabled,
+            # Configured but not yet implemented, so the gap is visible rather than assumed
+            # covered.
+            "guardrails_deferred": platform.guardrails.deferred,
         }
 
     @app.post("/v1/answer")
@@ -128,7 +91,7 @@ def build_app(platform: Platform) -> FastAPI:
         headers = {k.lower(): v for k, v in request.headers.items()}
 
         try:
-            state = _state_for(platform, body.query, headers)
+            state = platform.request_state(body.query, headers)
         except PragError as exc:
             response = to_response(exc)
             return JSONResponse(status_code=response.status, content=response.as_dict())
@@ -146,7 +109,7 @@ def build_app(platform: Platform) -> FastAPI:
             },
         ) as span:
             try:
-                run = await platform.engine.run(state)
+                run = await platform.answer(state)
             except AbstentionRequired as exc:
                 # An abstention is a 200 carrying an envelope. A 4xx would make the abstention
                 # rate indistinguishable from client error in every dashboard that groups by
@@ -211,7 +174,7 @@ async def _stream(platform: Platform, state: RequestState):
     """
     started = time.monotonic()
     try:
-        run = await platform.engine.run(state)
+        run = await platform.answer(state)
     except AbstentionRequired as exc:
         yield format_sse(SseEvent.DONE, _abstention_envelope(state, exc))
         return

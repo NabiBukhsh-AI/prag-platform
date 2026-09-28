@@ -8,7 +8,8 @@ from typing import Protocol, runtime_checkable
 from prag.core.models.common import Deadline, EmbeddingPurpose
 from prag.core.models.context import ContextBundle, ContextValidation, RenderedRegion
 from prag.core.models.generation import ModelSpec
-from prag.core.models.identity import Budget
+from prag.core.models.guardrails import ScreenResult
+from prag.core.models.identity import Budget, Principal
 from prag.core.models.memory import MemoryItem
 from prag.core.models.query import QueryAnalysis
 from prag.core.models.retrieval import Candidate, EvidenceGroup
@@ -18,6 +19,7 @@ __all__ = [
     "ContextValidator",
     "EmbeddingProvider",
     "EvidenceGrouper",
+    "EvidenceScreen",
     "PromptRenderer",
     "Reranker",
 ]
@@ -135,6 +137,27 @@ class EvidenceGrouper(Protocol):
 
         Near-duplicates must be *linked* rather than dropped. The link is what stops the
         agreement signal downstream from counting one fact several times.
+        """
+        ...
+
+
+@runtime_checkable
+class EvidenceScreen(Protocol):
+    """The retrieval-phase guardrails, run over every retrieved group before it reaches context.
+
+    At retrieval time and not only at ingest, because sources mutate: a document that was clean
+    when indexed can be edited into an injection vector afterwards.
+    """
+
+    async def screen(
+        self, principal: Principal, groups: Sequence[EvidenceGroup]
+    ) -> ScreenResult:
+        """Drop groups that fail a check and return the rest with the verdicts.
+
+        Must raise ``IsolationViolation`` rather than drop when a check proves a tenant
+        boundary broke, such as another tenant's canary in this tenant's evidence. Dropping would
+        answer the request from what is left, and a request that crossed a tenant boundary
+        cannot be made safe after the fact.
         """
         ...
 

@@ -19,10 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from prag.core.errors import Severity
 from prag.core.models.common import GuardrailPhase
+from prag.core.models.retrieval import EvidenceGroup
 
 __all__ = [
     "GuardrailPayload",
     "GuardrailVerdict",
+    "ScreenResult",
     "VerdictAction",
 ]
 
@@ -82,6 +84,9 @@ class GuardrailVerdict(BaseModel):
     detail: str | None = None
     modified_payload: GuardrailPayload | None = None
     latency_ms: int = Field(default=0, ge=0)
+    #: What the verdict is about when it is narrower than the whole payload — an evidence group
+    #: id at the retrieval phase. Lets a trace say which group was dropped, not only that one was.
+    subject_id: str | None = None
 
     @property
     def blocked(self) -> bool:
@@ -95,3 +100,17 @@ class GuardrailVerdict(BaseModel):
         interesting; an ALLOW that noticed something is.
         """
         return self.blocked or self.severity in (Severity.WARNING, Severity.CRITICAL)
+
+
+class ScreenResult(BaseModel):
+    """What survived the retrieval-phase guardrails, and why the rest did not.
+
+    Retrieval guardrails work on structured evidence rather than on a text payload, because the
+    decisions they make are per group: drop this one, keep that one. Flattening groups to text
+    and mapping verdicts back would lose exactly the identity the drop needs.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kept: tuple[EvidenceGroup, ...]
+    verdicts: tuple[GuardrailVerdict, ...] = ()

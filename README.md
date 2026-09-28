@@ -49,21 +49,24 @@ Five decisions carry the design:
 
 ## Status
 
-**Phase 1 is complete.** The build order was followed strictly: `core/` first and in full, then the
-contract suites, then storage with in-memory fakes, then the graph engine, then vertical slices
-one at a time.
+**Phases 1 and 2 are complete; Phase 3's evaluation and guardrail core is in place.** The build order was followed strictly: `core/` first and in
+full, then the contract suites, then storage with in-memory fakes, then the graph engine, then
+vertical slices one at a time.
 
-**486 tests passing**, ruff clean, and all 7 dependency contracts enforced by `import-linter`.
+**708 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
+evaluation gate passing on the seed golden and adversarial sets. CI runs all of it on every push
+and pull request, and every step blocks.
 
 ```bash
 docker compose up -d && make seed   # a working system, no cloud dependency
+make eval                           # scorecards plus the blocking regression gate
 ```
 
 ### Foundations — complete
 
 | Component | What it holds |
 |---|---|
-| `core/` | 24 protocols, 128 domain models, typed errors, the budget ladder, monotonic deadlines, DI container |
+| `core/` | 35 protocols, 130 domain models, typed errors, the budget ladder, monotonic deadlines, DI container |
 | `tests/contract/` | Conformance suites for 7 protocols, parameterized over every registered implementation |
 | `storage/` | Knowledge registry, 4 repositories, in-memory vector store with a vendor-neutral filter dialect |
 | `orchestration/graph` | Serializable graph definitions with load-time validation, plus the interpreter |
@@ -84,12 +87,51 @@ docker compose up -d && make seed   # a working system, no cloud dependency
 | Observability | Span attribute schema with enforced redaction |
 | Local stack | `docker-compose.yml`, `Dockerfile`, seed script that proves a query answers end to end |
 
+### Phase 2 — complete
+
+| Slice | What it delivers |
+|---|---|
+| Query intelligence | T0 rules classifier, cascade analyzer with honest per-field confidence and tier reporting |
+| Strategy routing | Hard constraints first (live data, exact quotation, private data), then expected-utility scoring over an empirical quality table with a Bayesian prior, exploration, and hedging |
+| Query transforms | Rewrite, coreference, alias expansion, rule-based decomposition into a sub-query DAG — each gated and budgeted |
+| Retrieval orchestration | Plans as data; parallel legs with per-leg deadlines, partial-results policy, per-source circuit breaker |
+| Hybrid retrieval | BM25 lexical source alongside dense, fused with reciprocal rank fusion (no score calibration needed) |
+| Reranking | Tiered and skippable; the degradation ladder's cheapest rung, with the skip reason recorded |
+| Caching | Key construction carrying tenant, ACL set, config and embedding versions; never-cache rules enforced in one place |
+
+T1 (trained encoder) and T2 (LLM fallback) classifiers are deliberately not built: T1 needs labels
+that Phase 2 traffic is meant to produce, and building it first would mean training on synthetic
+data and calling the result empirical. The analyzer counts escalations, so the case for building
+them is measurable.
+
+### Phase 3 — in progress
+
+| Slice | What it delivers |
+|---|---|
+| Guardrail chain | Input and output chains configured by name: injection and instruction-override pattern families, PII detection with policy-gated redaction, payload limits, citation validation, leakage (secrets, exfiltration-shaped URLs, foreign canaries). Fails closed; unknown names fail at startup |
+| Retrieval screen | Per-group checks at retrieval time: canary sighting fails the request, ACL recheck that does not trust the index filter, source quarantine, document-borne injection |
+| Tool gate | Provenance-gated executor: a tool call attributed to the evidence region, or to nothing, is refused before it runs |
+| Security events | Every security-relevant verdict becomes an event in one place; critical ones are isolation alerts |
+| Metrics | Recall/precision/hit rate/MRR/NDCG@k, coverage@k, groundedness, citation precision, completeness, abstention correctness, adversarial outcome — one implementation, used by every trigger |
+| Regression gate | Floors from the evaluation config plus tolerance against a committed baseline; judge-scored metrics gate nothing until the judge is calibrated |
+| Datasets | Synthetic seed corpus with golden and adversarial sets (`eval/seed/`); real sets live in the private files repository |
+| Online sampling | Deterministic per-request sampling that publishes an evaluation event off the request path |
+| CI | `.github/workflows/ci.yml`: lint, contracts, tests, adversarial suite, evaluation gate |
+
+The gate earned its place on its first run: it caught the local provider padding answers with
+off-topic sentences (citation precision 0.87 against a 0.95 floor), which is now fixed at the
+cause.
+
+Still to do for Phase 3: the LLM judge itself (the calibration tracking it must pass is built),
+an OpenTelemetry exporter with dashboards and alerts, an event bus so security events survive a
+request that ends in abstention, the tenant content-policy classifier and poisoning heuristics
+(both reported as deferred on `/health` rather than assumed covered), and the T1 classifier,
+which needs labels from real traffic.
+
 ### Later phases
 
 | Phase | Scope | State |
 |---|---|---|
-| 2 | Query intelligence, retrieval orchestration, caching, budget ladder | not started |
-| 3 | Evaluation, guardrails, observability | not started |
 | 4 | Parametric tier | not started |
 | 5 | Fusion, memory, structured knowledge | not started |
 | 6 | Bounded agents | not started |

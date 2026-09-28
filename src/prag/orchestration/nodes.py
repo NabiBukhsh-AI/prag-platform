@@ -13,8 +13,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from prag.core.errors import AbstentionRequired, RetrievalTotalFailure
-from prag.core.ids import new_plan_id
+from prag.core.errors import AbstentionRequired, DeadlineExceeded
+from prag.core.models.common import Deadline
 from prag.core.models.context import CoverageWarning
 from prag.core.models.fusion import (
     Abstention,
@@ -30,21 +30,22 @@ from prag.core.models.generation import (
     GenerationRequest,
     GroundingReport,
 )
-from prag.core.models.retrieval import (
-    CandidatePool,
-    LegStatus,
-    PlanBudget,
-    RetrievalLeg,
-    RetrievalPlan,
-)
+from prag.core.models.query import QueryVariants
 from prag.core.models.state import NodeResult, NodeStatus
 
 if TYPE_CHECKING:
     from prag.core.models.context import RenderedRegion
     from prag.core.models.state import RequestState
-    from prag.core.protocols.evidence import ContextBuilder, EvidenceGrouper, PromptRenderer
+    from prag.core.protocols.evidence import (
+        ContextBuilder,
+        EvidenceGrouper,
+        EvidenceScreen,
+        PromptRenderer,
+        Reranker,
+    )
     from prag.core.protocols.generation import GroundingVerifier, LLMProvider, ModelRouter
-    from prag.core.protocols.retrieval import KnowledgeSource
+    from prag.core.protocols.intelligence import QueryAnalyzer, StrategyRouter
+    from prag.core.protocols.retrieval import RetrievalOrchestrator, RetrievalPlanner
 
 __all__ = [
     "AbstainNode",
@@ -57,12 +58,59 @@ __all__ = [
 
 
 class AnalyzeNode:
-    """Produces the query analysis.
+    """Produces the query analysis, the strategy decision, and the query variants.
 
-    Phase 1 has no trained classifier, so this fills a deterministic analysis from the raw
-    query. It is honest about that: ``classifier_tier_used`` reports ``T0``, the rules tier, so a
-    trace never claims a model made a decision that a default made.
+    All three together, because routing needs the per-head confidences the analysis carries and
+    the transforms need the routing decision to know which variants are worth producing.
+    Splitting them across nodes would thread the same object through three steps for no gain.
+
+    The analyzer, router and transforms arrive through protocols. A node that constructed them
+    could not be tested against a fake, and the subsystems could never move out of process.
     """
+
+    node_id = "analyze"
+    reads = frozenset({"raw_query"})
+    writes = frozenset({"analysis", "strategy", "variants"})
+    timeout_ms = 300
+    fallback_node = None
+
+    def __init__(
+        self,
+        analyzer: QueryAnalyzer,
+        router: StrategyRouter,
+        *,
+        transform_budget_ms: int = 120,
+    ) -> None:
+        self._analyzer = analyzer
+        self._router = router
+        self._transform_budget_ms = transform_budget_ms
+
+    async def run(self, state: RequestState) -> NodeResult:
+        from prag.intelligence.transform import apply_transforms
+
+        analysis = await self._analyzer.analyze(
+            state.raw_query,
+            state.session,
+            state.principal,
+            state.budget.deadline_for(self.node_id, 0.3),
+        )
+        strategy = self._router.route(analysis, state.principal, state.budget, state.policy)
+        # Transforms run after routing so a strategy that will not retrieve does not pay for
+        # variants nothing will use.
+        variants = await apply_transforms(
+            analysis,
+            Deadline.in_ms(self._transform_budget_ms, label="analyze.transform"),
+        )
+
+        return NodeResult(
+            node_id=self.node_id,
+            status=NodeStatus.OK,
+            state=state.advanced(analysis=analysis, strategy=strategy, variants=variants),
+        )
+
+
+class _LegacyAnalyzeNode:
+    """The Phase-1 defaulted analyzer, kept for tests that need a node with no dependencies."""
 
     node_id = "analyze"
     reads = frozenset({"raw_query"})
@@ -126,12 +174,15 @@ class AnalyzeNode:
 
 
 class RetrieveNode:
-    """Executes a single-leg retrieval plan against one source.
+    """Plans, executes and reranks retrieval across every registered source.
 
-    Phase 1 runs one source, so the plan is a formality — but it is built anyway, because a plan
-    can be logged, diffed against what a later router would have produced, and replayed. Skipping
-    it now would mean retrieving implicitly from scattered arguments and having nothing to
-    compare against when a second source arrives.
+    The plan is a first-class object even with one source, because a plan is a record of a
+    decision: it can be logged, diffed against what a different router would have produced, and
+    replayed offline against a recorded analysis without touching an index.
+
+    Reranking runs here rather than in its own node so that the degradation ladder's decision to
+    skip it stays adjacent to the retrieval it reorders. A separate node would have to re-derive
+    the budget state to make the same call.
     """
 
     node_id = "retrieve"
@@ -141,54 +192,82 @@ class RetrieveNode:
     fallback_node = None
 
     def __init__(
-        self, source: KnowledgeSource, grouper: EvidenceGrouper, *, top_k: int = 8
+        self,
+        planner: RetrievalPlanner,
+        orchestrator: RetrievalOrchestrator,
+        grouper: EvidenceGrouper,
+        *,
+        reranker: Reranker | None = None,
+        screen: EvidenceScreen | None = None,
+        wall_ms: int = 260,
+        rerank_output_k: int = 8,
     ) -> None:
-        self._source = source
-        # Injected rather than imported. A node that imports the evidence subsystem cannot be
-        # tested without it, and the subsystem can never move out of process.
+        # Every one of these arrives through a protocol. A node that imported the retrieval or
+        # evidence packages could not be tested without them, and neither subsystem could move
+        # out of process — which is the property the whole modular monolith rests on.
+        self._planner = planner
+        self._orchestrator = orchestrator
         self._grouper = grouper
-        self._top_k = top_k
+        self._reranker = reranker
+        self._screen = screen
+        self._wall_ms = wall_ms
+        self._rerank_output_k = rerank_output_k
 
     async def run(self, state: RequestState) -> NodeResult:
         assert state.analysis is not None  # the interpreter checked `reads` before calling
-        query = state.analysis.normalized_query
+        variants = state.variants or QueryVariants(raw=state.analysis.normalized_query)
 
-        plan = RetrievalPlan(
-            plan_id=new_plan_id(),
-            legs=(
-                RetrievalLeg(
-                    leg_id="leg.vector",
-                    source_id=self._source.source_id,
-                    query_variant="raw",
-                    query_text=query,
-                    top_k=self._top_k,
-                    timeout_ms=self.timeout_ms,
-                    required=True,
-                ),
-            ),
-            budget=PlanBudget(wall_ms=self.timeout_ms),
+        plan = self._planner.plan(
+            state.analysis,
+            variants,
+            wall_ms=min(self._wall_ms, max(1, state.budget.wall_ms_remaining)),
         )
+        pool = await self._orchestrator.execute(plan, state.principal, state.budget)
+        candidates = await self._maybe_rerank(state, plan, pool.candidates)
+        groups = tuple(self._grouper.group(candidates))
 
-        deadline = state.budget.deadline_for(self.node_id, 0.5)
-        result = await self._source.retrieve(plan.legs[0], state.principal, deadline)
+        next_state = state.advanced(plan=plan, pool=pool, evidence=groups)
+        if self._screen is not None:
+            # After grouping, so a drop removes the whole group: a near-duplicate of an
+            # injected or foreign chunk is no safer than the chunk. An isolation violation
+            # raises straight through; the engine re-raises it rather than falling back.
+            screened = await self._screen.screen(state.principal, groups)
+            next_state = next_state.advanced(evidence=screened.kept)
+            for verdict in screened.verdicts:
+                next_state = next_state.with_verdict(verdict)
 
-        if result.status is LegStatus.FAILED:
-            raise RetrievalTotalFailure(
-                "the only required leg failed",
-                leg_id=result.leg_id,
-                source_id=result.source_id,
+        return NodeResult(node_id=self.node_id, status=NodeStatus.OK, state=next_state)
+
+    async def _maybe_rerank(self, state, plan, candidates):
+        """Rerank if the ladder allows it, and fall back to the fused order if not.
+
+        The gate lives here rather than in the evidence package because it is an orchestration
+        decision: it reads the degradation level, which is request state. Reranking is the
+        ladder's cheapest rung, and skipping it is normal operation rather than a failure — the
+        fused ordering it falls back to was already a valid ordering.
+        """
+        from prag.core.budget import DegradationLevel, DegradationPlan
+
+        ladder = DegradationPlan(level=DegradationLevel(state.budget.degradation_level))
+        if self._reranker is None or not ladder.rerank_allowed or not candidates:
+            return tuple(candidates[: self._rerank_output_k])
+
+        deadline = state.budget.deadline_for(f"{self.node_id}.rerank", 0.2)
+        if deadline.expired:
+            return tuple(candidates[: self._rerank_output_k])
+
+        try:
+            reranked = await self._reranker.rerank(
+                state.analysis.normalized_query,
+                list(candidates[: plan.rerank.input_k]),
+                self._rerank_output_k,
+                deadline,
             )
+        except (DeadlineExceeded, Exception):
+            # A broken or slow reranker degrades the ordering; it must not fail the request.
+            return tuple(candidates[: self._rerank_output_k])
 
-        pool = CandidatePool(
-            plan_id=plan.plan_id, leg_results=(result,), candidates=result.candidates
-        )
-        return NodeResult(
-            node_id=self.node_id,
-            status=NodeStatus.OK,
-            state=state.advanced(
-                plan=plan, pool=pool, evidence=tuple(self._grouper.group(pool.candidates))
-            ),
-        )
+        return tuple(reranked)
 
 
 class BuildContextNode:

@@ -183,6 +183,7 @@ class VectorKnowledgeSource:
                 created_at_ms=now,
                 updated_at_ms=now,
                 acl_hash=fields["acl_hash"],
+                tenant_id=fields["tenant_id"],
                 volatility_class=_volatility(hit.payload.get("volatility_class")),
                 lineage_root=fields["lineage_root"],
                 title=" > ".join(fields["heading_path"]) or None,

@@ -97,7 +97,45 @@ class RequestState(BaseModel):
         return self.model_copy(update={"events": (*self.events, event)})
 
     def with_verdict(self, verdict: GuardrailVerdict) -> RequestState:
-        return self.model_copy(update={"guardrail_verdicts": (*self.guardrail_verdicts, verdict)})
+        """Record a verdict, and publish it as an event when it is security-relevant.
+
+        The event is derived here rather than by each caller, so no guardrail call site can
+        record a block and forget to raise the alert. Critical verdicts become isolation alerts,
+        which page; everything else security-relevant is a plain security event.
+        """
+        state = self.model_copy(
+            update={"guardrail_verdicts": (*self.guardrail_verdicts, verdict)}
+        )
+        if not verdict.is_security_event:
+            return state
+
+        import time
+
+        from prag.core.errors import Severity
+        from prag.core.ids import new_id
+        from prag.core.models.events import EventKind
+
+        return state.with_event(
+            DomainEvent(
+                event_id=new_id("evt"),
+                kind=(
+                    EventKind.ISOLATION_ALERT
+                    if verdict.severity is Severity.CRITICAL
+                    else EventKind.SECURITY_EVENT
+                ),
+                request_id=self.request_id,
+                tenant_id=self.principal.tenant_id,
+                occurred_at_ms=int(time.time() * 1000),
+                # The reason code and never the detail: detail may quote the offending span,
+                # and an event bus is not a place for injected text or leaked secrets.
+                payload={
+                    "guardrail": verdict.guardrail,
+                    "phase": str(verdict.phase),
+                    "action": str(verdict.action),
+                    "reason_code": verdict.reason_code,
+                },
+            )
+        )
 
     def with_timing(self, node_id: str, elapsed_ms: int) -> RequestState:
         return self.model_copy(update={"node_timings": {**self.node_timings, node_id: elapsed_ms}})

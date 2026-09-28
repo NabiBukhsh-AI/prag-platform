@@ -440,6 +440,12 @@ class GuardrailsConfig(BaseModel):
     #: injection. Retrieved evidence can never authorise a tool call.
     tool_provenance_gate: bool = True
     strict_mode: bool = False
+    #: Redact PII from the query before generation. Off by default: a user asking about their
+    #: own account needs the model to see the account number. Logs are redacted regardless.
+    redact_pii_before_generation: bool = False
+    #: Tenant id to the canary strings seeded in that tenant's corpus. Loaded from the secret
+    #: store in production, never committed: a canary an attacker knows is one they avoid.
+    canaries: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
 
 class MemoryConfig(BaseModel):
