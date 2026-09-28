@@ -268,6 +268,9 @@ class KnowledgeDecision(BaseModel):
     #: one, for example "from general knowledge, not from your documents". Composed by the
     #: platform, never by the model.
     epistemic_marking: str | None = None
+    #: Set when the evidence is old relative to the query's half-life. Carried to the envelope
+    #: so the answer states its age instead of presenting old evidence as current.
+    staleness: StalenessWarning | None = None
 
     @property
     def abstained(self) -> bool:

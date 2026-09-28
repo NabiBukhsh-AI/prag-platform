@@ -53,7 +53,7 @@ Five decisions carry the design:
 build order was followed strictly: `core/` first and in full, then the contract suites, then
 storage with in-memory fakes, then the graph engine, then vertical slices one at a time.
 
-**840 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
+**866 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
 evaluation gate passing on the seed golden and adversarial sets. CI runs all of it on every push
 and pull request, and every step blocks.
 
@@ -155,11 +155,26 @@ set, 2 of 9 queries are served parametrically at about 3% of the grounded path's
 groundedness, and the rest fall back — mostly because the local hashing embedder's coverage scores
 are low, which is why the tests and comparison lower the coverage floor from 0.62 to 0.35.
 
+### Phase 5 — in progress
+
+| Slice | State |
+|---|---|
+| Fusion decision policy | Done. The §11.4 table as code, one test per row; the two abstention rules are hard gates evaluated before any score |
+| Confidence calibration | Done. Isotonic calibrator with expected calibration error on held-out data; an uncalibrated calibrator reports the worst error rather than a flattering one |
+| Independence correction | Done. Sources sharing a lineage root count once, at their strongest authority |
+| Conflict surfacing | Done. Source-versus-source conflicts are surfaced at comparable authority and resolved toward the stronger source otherwise; both appear in the envelope as structure, and the prose is generated from it |
+| Staleness | Done. Evidence older than the query's half-life carries a warning, or abstains in strict mode |
+| Memory tiers | Next |
+| Graph and SQL sources, multi-hop | After memory |
+
+Fusion also changed two behaviours for the better: an off-topic retrieval now abstains instead of
+answering with its nearest sentence, and a parametric answer the corpus independently supports is
+reported as hybrid rather than parametric.
+
 ### Later phases
 
 | Phase | Scope | State |
 |---|---|---|
-| 5 | Fusion, memory, structured knowledge | not started |
 | 6 | Bounded agents | not started |
 | 7 | Scale and multi-tenancy hardening | not started |
 

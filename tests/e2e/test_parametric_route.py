@@ -121,7 +121,9 @@ class TestParametricAnswer:
         envelope = run.state.result
         assert envelope is not None
         assert "15 minutes" in envelope.answer
-        assert envelope.confidence.basis is KnowledgeBasis.PARAMETRIC
+        # Hybrid: the words came from the adapter, and the corpus independently supports them
+        # strongly enough to ground the answer on its own.
+        assert envelope.confidence.basis is KnowledgeBasis.HYBRID
         assert [a.adapter_id for a in envelope.diagnostics.adapters] == [record.adapter_id]
         assert events(run, EventKind.PARAMETRIC_SERVED)
 
@@ -143,7 +145,7 @@ class TestParametricAnswer:
         run = await ask(platform, ESCALATION)
 
         assert run.state.decision is not None
-        assert run.state.decision.basis is KnowledgeBasis.PARAMETRIC
+        assert run.state.decision.basis in (KnowledgeBasis.PARAMETRIC, KnowledgeBasis.HYBRID)
         assert "learned knowledge" in (run.state.decision.epistemic_marking or "")
 
     async def test_an_uncovered_question_takes_the_grounded_path(self) -> None:

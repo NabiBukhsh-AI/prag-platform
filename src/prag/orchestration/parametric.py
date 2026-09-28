@@ -19,12 +19,14 @@ import math
 import time
 from typing import TYPE_CHECKING
 
-from prag.core.ids import new_id
-from prag.core.models.context import RegionName, RenderedRegion
+from prag.core.errors import AbstentionRequired
+from prag.core.ids import new_id, short_hash
+from prag.core.models.context import ContextBundle, RegionName, RenderedRegion
 from prag.core.models.events import DomainEvent, EventKind
 from prag.core.models.fusion import (
     ConfidenceBand,
     ConfidenceBlock,
+    ConflictKind,
     KnowledgeBasis,
     KnowledgeDecision,
     ParametricSignal,
@@ -41,7 +43,7 @@ from prag.core.models.state import NodeResult, NodeStatus
 
 if TYPE_CHECKING:
     from prag.core.models.state import RequestState
-    from prag.core.protocols.fusion import ProvenanceShadower
+    from prag.core.protocols.fusion import FusionPolicy, ProvenanceShadower
     from prag.core.protocols.generation import LLMProvider, ModelRouter
     from prag.core.protocols.parametric import AdapterSelector
     from prag.orchestration.graph.definition import GraphDefinition
@@ -193,8 +195,14 @@ class ShadowNode:
     timeout_ms = 1_000
     fallback_node = "build_context"
 
-    def __init__(self, shadower: ProvenanceShadower) -> None:
+    def __init__(
+        self, shadower: ProvenanceShadower, *, fusion: FusionPolicy | None = None
+    ) -> None:
         self._shadower = shadower
+        # The same table the grounded path uses, so a parametric answer faces the same hard
+        # gates: a private question with no supporting evidence abstains however confident the
+        # weights are.
+        self._fusion = fusion
 
     async def run(self, state: RequestState) -> NodeResult:
         signal = state.parametric
@@ -210,11 +218,36 @@ class ShadowNode:
             state.budget.deadline_for(self.node_id, 0.3),
         )
 
-        if report.conflicts:
+        fused = None
+        if self._fusion is not None and not report.conflicts:
+            fused = await self._fusion.decide(
+                state.analysis,
+                signal,
+                ContextBundle(
+                    bundle_id=new_id("shadow"),
+                    regions=(),
+                    evidence=state.evidence,
+                    rendered_prompt_hash=short_hash(signal.probe_answer),
+                ),
+                None,
+                state.policy,
+            )
+            if fused.abstention is not None:
+                raise AbstentionRequired(
+                    fused.abstention.explanation,
+                    abstention_code=str(fused.abstention.reason_code),
+                    suggested_action=fused.abstention.suggested_action,
+                )
+        policy_conflicts = tuple(
+            c
+            for c in (fused.conflicts if fused is not None else ())
+            if c.kind is ConflictKind.PARAMETRIC_VS_RETRIEVED
+        )
+        if report.conflicts or policy_conflicts:
             # Evidence wins. Every conflict is published — it is the labelled signal that
             # retrains the adapter — and the request falls through to the grounded path.
             failed = state
-            for conflict in report.conflicts:
+            for conflict in report.conflicts or policy_conflicts:
                 failed = failed.with_event(
                     _event(
                         state,
@@ -255,26 +288,38 @@ class ShadowNode:
                 answer = answer.replace(verdict.claim, f"{verdict.claim} [unsourced]", 1)
 
         confidence = signal.calibrated_confidence
-        p_retrieval = min(
-            1.0, max((g.representative.effective_score for g in state.evidence), default=0.0)
+        # Evidence strong enough to ground the answer on its own makes this a hybrid: the words
+        # came from the weights, and the corpus independently confirms them.
+        basis = (
+            KnowledgeBasis.HYBRID
+            if fused is not None and fused.basis is KnowledgeBasis.RETRIEVED_EVIDENCE
+            else KnowledgeBasis.PARAMETRIC
         )
-        decision = KnowledgeDecision(
-            basis=KnowledgeBasis.PARAMETRIC,
-            knowledge_score=confidence,
-            p_parametric=confidence,
-            p_retrieval=max(0.0, p_retrieval),
-            agreement_independent=report.grounding.groundedness,
-            authority_max=max((g.authority for g in state.evidence), default=0.0),
-            epistemic_marking=EPISTEMIC_MARKING,
-        )
+        if fused is not None:
+            decision = fused.model_copy(
+                update={"basis": basis, "epistemic_marking": EPISTEMIC_MARKING}
+            )
+        else:
+            p_retrieval = min(
+                1.0, max((g.representative.effective_score for g in state.evidence), default=0.0)
+            )
+            decision = KnowledgeDecision(
+                basis=basis,
+                knowledge_score=confidence,
+                p_parametric=confidence,
+                p_retrieval=max(0.0, p_retrieval),
+                agreement_independent=report.grounding.groundedness,
+                authority_max=max((g.authority for g in state.evidence), default=0.0),
+                epistemic_marking=EPISTEMIC_MARKING,
+            )
         envelope = AnswerEnvelope(
             request_id=state.request_id,
             answer=answer,
             citations=tuple(citations),
-            confidence=ConfidenceBlock(
-                score=confidence, band=_band(confidence), basis=KnowledgeBasis.PARAMETRIC
-            ),
+            confidence=ConfidenceBlock(score=confidence, band=_band(confidence), basis=basis),
             grounding=report.grounding,
+            conflicts=decision.conflicts,
+            staleness_warning=decision.staleness,
             diagnostics=Diagnostics(
                 route_class="parametric",
                 strategy=str(Strategy.PARAMETRIC),

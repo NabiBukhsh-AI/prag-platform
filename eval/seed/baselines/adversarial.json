@@ -9,9 +9,9 @@
     },
     "groundedness": {
       "judged": false,
-      "mean": 0.6666666666666666,
-      "n": 3,
-      "pass_rate": 0.6666666666666666
+      "mean": 1.0,
+      "n": 2,
+      "pass_rate": 1.0
     }
   }
 }

@@ -11,6 +11,9 @@ versions. Their compatibility rules are specified separately.
 ## [Unreleased]
 
 ### Changed
+- The grounded path and the parametric shadow step both decide through the fusion policy. An
+  off-topic retrieval now abstains, and a parametric answer the corpus independently supports is
+  reported as hybrid.
 - The strategy router checks adapter coverage per tenant and domain, and admits private-data
   queries to the parametric route only with a tenant-scoped adapter.
 - The parametric/retrieval independence contract now covers both packages.
@@ -39,6 +42,12 @@ versions. Their compatibility rules are specified separately.
 - `httpx` is declared in the `dev` extra; FastAPI's test client needs it.
 
 ### Added
+- `fusion.policy`: the §11.4 decision table (`TablePolicy`), independence-corrected agreement,
+  source-versus-source conflict detection with surfacing or authority resolution, parametric
+  conflict detection, and staleness warnings with strict-mode abstention.
+- `fusion.calibration`: an isotonic calibrator and expected calibration error.
+- The envelope carries conflicts and staleness warnings, with explanatory prose generated from
+  that structure.
 - `parametric`: the eligibility gate, the adapter registry, checksum-verified LRU residency,
   the tenant-scoped centroid selector, and document revocation.
 - `parametric.pipeline`: clustering, augmentation and its quality filter, training, probes, the

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         PromptRenderer,
         Reranker,
     )
+    from prag.core.protocols.fusion import FusionPolicy
     from prag.core.protocols.generation import GroundingVerifier, LLMProvider, ModelRouter
     from prag.core.protocols.intelligence import QueryAnalyzer, StrategyRouter
     from prag.core.protocols.retrieval import RetrievalOrchestrator, RetrievalPlanner
@@ -279,9 +280,18 @@ class BuildContextNode:
     timeout_ms = 500
     fallback_node = None
 
-    def __init__(self, builder: ContextBuilder, router: ModelRouter) -> None:
+    def __init__(
+        self,
+        builder: ContextBuilder,
+        router: ModelRouter,
+        *,
+        fusion: FusionPolicy | None = None,
+    ) -> None:
         self._builder = builder
         self._router = router
+        # Optional so the node still works in graphs assembled before fusion existed; the
+        # platform always injects one.
+        self._fusion = fusion
 
     async def run(self, state: RequestState) -> NodeResult:
         from prag.core.models.parametric import AdapterSet
@@ -324,6 +334,32 @@ class BuildContextNode:
         # Memory is empty until the memory tier lands in Phase 5. Passing an empty sequence
         # is honest; a stub accessor would imply a tier that does not exist yet.
         bundle = await self._builder.build(state.analysis, state.evidence, [], spec, state.budget)
+
+        if self._fusion is not None:
+            # The policy table decides over what actually made it into context. Its two
+            # abstention rules are gates: no score overrides them.
+            decision = await self._fusion.decide(
+                state.analysis, state.parametric, bundle, None, state.policy
+            )
+            if decision.abstention is not None:
+                raise AbstentionRequired(
+                    decision.abstention.explanation,
+                    abstention_code=str(decision.abstention.reason_code),
+                    suggested_action=decision.abstention.suggested_action,
+                )
+            if decision.basis is KnowledgeBasis.PARAMETRIC:
+                # Retrieval could not support an answer and this is the grounded path: the
+                # parametric route, not this one, is where the weights may answer.
+                raise AbstentionRequired(
+                    "retrieved evidence is too weak to ground an answer",
+                    abstention_code=str(AbstentionCode.KNOWLEDGE_BELOW_FLOOR),
+                    suggested_action="rephrase the question, or check that the source is indexed",
+                )
+            if decision.conflicts:
+                # Conflicting evidence is the case for the reasoning profile, if one exists.
+                spec = self._router.select(
+                    state.analysis, decision, AdapterSet(), state.budget, state.policy
+                )
 
         return NodeResult(
             node_id=self.node_id,
@@ -462,14 +498,20 @@ def _envelope(state, *, generated, grounding, bundle) -> AnswerEnvelope:
         for c in _citations_for(verdict, bundle)
     )
 
+    decision = state.decision
+    conflicts = decision.conflicts if decision is not None else ()
+    staleness = decision.staleness if decision is not None else None
+
     return AnswerEnvelope(
         request_id=state.request_id,
-        answer=generated.text,
+        answer=generated.text + _structured_notes(conflicts, staleness),
         citations=citations,
         confidence=ConfidenceBlock(
             score=groundedness, band=band, basis=KnowledgeBasis.RETRIEVED_EVIDENCE
         ),
         grounding=grounding,
+        conflicts=conflicts,
+        staleness_warning=staleness,
         coverage_warning=(
             CoverageWarning(
                 coverage=0.0,
@@ -497,6 +539,39 @@ def _envelope(state, *, generated, grounding, bundle) -> AnswerEnvelope:
             node_timings_ms=dict(state.node_timings),
         ),
     )
+
+
+def _structured_notes(conflicts, staleness) -> str:
+    """Prose generated from the structure, so the words and the numbers cannot disagree.
+
+    Only for what the reader must see: conflicts between sources, and stale evidence. A
+    parametric claim that lost to the evidence is logged, not narrated — the answer already
+    states what the evidence says.
+    """
+    from prag.core.models.fusion import ConflictKind, ConflictResolution
+
+    notes = []
+    for conflict in conflicts:
+        if conflict.kind is not ConflictKind.SOURCE_VS_SOURCE or len(conflict.positions) < 2:
+            continue
+        first, second = conflict.positions[0], conflict.positions[1]
+        if conflict.resolution is ConflictResolution.SURFACED:
+            notes.append(
+                f'Sources disagree here: {first.origin_id} says "{first.excerpt}", while '
+                f'{second.origin_id} says "{second.excerpt}".'
+            )
+        else:
+            notes.append(
+                f"A lower-authority source ({second.origin_id}) disagrees: "
+                f'"{second.excerpt}".'
+            )
+    if staleness is not None:
+        notes.append(
+            f"Note: the supporting evidence is {staleness.staleness_ratio:.1f} times older than "
+            f"this kind of information typically stays accurate "
+            f"({staleness.half_life_days:.0f}-day half-life)."
+        )
+    return "".join(f"\n\n{note}" for note in notes)
 
 
 def _citations_for(verdict, bundle):

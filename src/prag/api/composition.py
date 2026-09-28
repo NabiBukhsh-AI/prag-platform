@@ -25,7 +25,7 @@ from prag.core.models.events import DomainEvent, EventKind
 from prag.core.models.guardrails import GuardrailPayload
 from prag.evaluation import sampled
 from prag.evidence import CandidateGrouper, LexicalOverlapReranker
-from prag.fusion import ConflictMonitor, EntailmentProvenanceShadower
+from prag.fusion import ConflictMonitor, EntailmentProvenanceShadower, TablePolicy
 from prag.generation import (
     HeuristicGroundingVerifier,
     LocalExtractiveProvider,
@@ -506,6 +506,14 @@ def build_platform(
     parametric = (
         _build_parametric(settings, embedder) if settings.parametric.enabled else None
     )
+    fusion = TablePolicy(
+        weights=settings.fusion.weights,
+        parametric_authority=settings.fusion.parametric_authority,
+        surface_below_delta=settings.fusion.surface_conflicts_when_authority_delta_below,
+        abstain_on_private_without_evidence=(
+            settings.fusion.abstain_on_private_query_without_evidence
+        ),
+    )
 
     nodes: dict[str, object] = {
         "analyze": AnalyzeNode(
@@ -533,7 +541,7 @@ def build_platform(
             screen=guardrails.screen,
             wall_ms=settings.retrieval.wall_ms,
         ),
-        "build_context": BuildContextNode(builder, router),
+        "build_context": BuildContextNode(builder, router, fusion=fusion),
         "generate": GenerateNode(
             LocalExtractiveProvider(),
             verifier,
@@ -546,7 +554,7 @@ def build_platform(
         engine = GraphEngine(standard_answer_graph(), nodes)  # type: ignore[arg-type]
     else:
         nodes["parametric"] = parametric.node
-        nodes["shadow"] = ShadowNode(EntailmentProvenanceShadower(verifier))
+        nodes["shadow"] = ShadowNode(EntailmentProvenanceShadower(verifier), fusion=fusion)
         engine = GraphEngine(
             parametric_answer_graph(),
             nodes,  # type: ignore[arg-type]
