@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from prag.core.models.common import MemoryNamespace
+from prag.memory import PrincipalMemoryStore
 from tests.fakes.caching import InMemoryCacheTier
 from tests.fakes.memory import InMemoryMemoryStore
 from tests.fakes.providers import DeterministicEmbeddingProvider, RecordedLLMProvider
@@ -43,11 +44,13 @@ embedding_provider_implementations: list[tuple[str, Callable[..., Any]]] = [
 ]
 
 session_memory_implementations: list[tuple[str, Callable[..., Any]]] = [
-    ("in_memory", lambda: InMemoryMemoryStore(MemoryNamespace.SESSION)),
+    ("fake", lambda: InMemoryMemoryStore(MemoryNamespace.SESSION)),
+    ("principal_store", PrincipalMemoryStore.session),
 ]
 
 long_term_memory_implementations: list[tuple[str, Callable[..., Any]]] = [
-    ("in_memory", lambda: InMemoryMemoryStore(MemoryNamespace.LONG_TERM)),
+    ("fake", lambda: InMemoryMemoryStore(MemoryNamespace.LONG_TERM)),
+    ("principal_store", PrincipalMemoryStore.long_term),
 ]
 
 cache_tier_implementations: list[tuple[str, Callable[..., Any]]] = [

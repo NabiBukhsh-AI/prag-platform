@@ -42,6 +42,18 @@ versions. Their compatibility rules are specified separately.
 - `httpx` is declared in the `dev` extra; FastAPI's test client needs it.
 
 ### Added
+- `memory`: `PrincipalMemoryStore` in session and long-term configurations, with TTL expiry, a
+  recent-turn window, rolling summaries keeping entities and decisions verbatim, relevance- and
+  salience-ranked long-term reads, decay refreshed by use, eviction by value, and store-enforced
+  write gating (`MemoryWriteRefused`).
+- Session context from an `x-session-id` header; every answered or abstained turn is recorded in
+  session memory, and answers are stored as model-generated so they can never become long-term
+  facts. Blocked turns are never recorded.
+- `POST /v1/memory` (explicit user assertions into long-term memory) and
+  `POST /v1/memory/forget` (erasure across tiers, returning a count).
+- The citation validator resolves `[E]` and `[M]` markers each only against its own namespace.
+- Contamination tests across memory namespaces, and both stores registered in the memory
+  conformance suite.
 - `fusion.policy`: the §11.4 decision table (`TablePolicy`), independence-corrected agreement,
   source-versus-source conflict detection with surfacing or authority resolution, parametric
   conflict detection, and staleness warnings with strict-mode abstention.

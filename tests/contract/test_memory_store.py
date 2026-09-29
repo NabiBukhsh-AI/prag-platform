@@ -103,12 +103,28 @@ async def test_namespace_mismatch_is_refused(session_memory: Any, principal: Pri
 async def test_summarize_keeps_decisions_verbatim(
     session_memory: Any, principal: Principal
 ) -> None:
-    await session_memory.write(principal, make_memory_item("we chose Postgres"))
+    await session_memory.write(
+        principal, make_memory_item("we chose Postgres", session_id="session-1")
+    )
+    await session_memory.write(
+        principal, make_memory_item("we chose MySQL", session_id="session-2")
+    )
     summary = await session_memory.summarize(principal, "session-1")
 
     assert summary.session_id == "session-1"
     assert summary.summary_hash
     assert "we chose Postgres" in summary.verbatim_decisions
+    assert "we chose MySQL" not in summary.verbatim_decisions, "one conversation, not all"
+
+
+async def test_read_can_be_narrowed_to_one_session(
+    session_memory: Any, principal: Principal
+) -> None:
+    await session_memory.write(principal, make_memory_item("alpha note", session_id="s1"))
+    await session_memory.write(principal, make_memory_item("beta note", session_id="s2"))
+
+    found = await session_memory.read(principal, "note", limit=10, session_id="s1")
+    assert [i.text for i in found] == ["alpha note"]
 
 
 async def test_forget_returns_a_count(session_memory: Any, principal: Principal) -> None:

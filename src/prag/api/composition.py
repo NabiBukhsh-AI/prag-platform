@@ -37,6 +37,7 @@ from prag.ingestion import index_chunks, normalize_markdown, validate_chunks
 from prag.ingestion.chunking import default_registry
 from prag.ingestion.embedding import HashingEmbeddingProvider
 from prag.intelligence import CascadeQueryAnalyzer, UtilityStrategyRouter
+from prag.memory import PrincipalMemoryStore
 from prag.observability import (
     InMemoryEventBus,
     Metrics,
@@ -78,6 +79,9 @@ from prag.storage.vectorstore import InMemoryVectorStore
 if TYPE_CHECKING:
     from prag.config import PragSettings
     from prag.core.models.document import Chunk
+    from prag.core.models.identity import Principal
+    from prag.core.models.memory import MemoryItem, MemorySelector
+    from prag.core.models.query import SessionContext
     from prag.core.models.state import RequestState
     from prag.orchestration.graph.engine import GraphRun
 
@@ -232,6 +236,8 @@ class Platform:
     events: InMemoryEventBus = field(default_factory=InMemoryEventBus)
     metrics: Metrics = field(default_factory=Metrics)
     parametric: ParametricTier | None = None
+    session_memory: PrincipalMemoryStore | None = None
+    long_term_memory: PrincipalMemoryStore | None = None
     collection: str = "chunks"
 
     def request_state(self, query: str, headers: dict[str, str]) -> RequestState:
@@ -250,6 +256,7 @@ class Platform:
         tier = str(principal.sla_tier)
         wall_ms = _WALL_MS_BY_TIER.get(tier, 10_000)
         return RequestState(
+            session=self._session_context(principal, headers.get("x-session-id")),
             request_id=new_request_id(),
             trace_id=new_trace_id(),
             principal=principal,
@@ -284,13 +291,105 @@ class Platform:
                 )
             self._finish(final, _outcome_of(exc), started_ms, started)
             await self._apply_adapter_decisions()
+            if isinstance(exc, AbstentionRequired):
+                # Abstention is an outcome, not a failure: the user still said this, and the
+                # next turn may refer back to it. A blocked or isolation-violating turn is never
+                # remembered — that is how a refused instruction would persist.
+                await self._remember_turn(final)
             raise
 
         result = run.state.result
         outcome = "abstained" if result is None or result.abstained else "answered"
         self._finish(run.state, outcome, started_ms, started)
         await self._apply_adapter_decisions()
+        await self._remember_turn(run.state)
         return run
+
+    def _session_context(
+        self, principal: Principal, session_id: str | None
+    ) -> SessionContext | None:
+        """The conversation this request continues, with its rolling summary if one exists."""
+        from prag.core.models.query import SessionContext
+
+        if not session_id or self.session_memory is None:
+            return None
+        summary = self.session_memory.latest_summary(principal, session_id)
+        return SessionContext(
+            session_id=session_id,
+            turn_index=self.session_memory.turn_count(principal, session_id),
+            summary=summary.summary if summary else None,
+            decisions=summary.verbatim_decisions if summary else (),
+            summary_hash=summary.summary_hash if summary else None,
+        )
+
+    async def _remember_turn(self, state: RequestState) -> None:
+        """Record the turn in session memory, and roll the summary once past the window.
+
+        The answer is stored as model-generated, which session memory accepts and long-term
+        memory refuses: it is part of the conversation, never a fact about the user.
+        """
+        from prag.core.ids import new_id
+        from prag.core.models.common import MemoryNamespace, Provenance
+        from prag.core.models.memory import MemoryItem
+
+        store, session = self.session_memory, state.session
+        if store is None or session is None:
+            return
+        now = int(time.time() * 1000)
+        turns = [(state.raw_query, Provenance.USER_ASSERTED)]
+        if state.result is not None and state.result.answer and not state.result.abstained:
+            turns.append((state.result.answer, Provenance.MODEL_GENERATED))
+        for text, provenance in turns:
+            await store.write(
+                state.principal,
+                MemoryItem(
+                    item_id=new_id("mem"),
+                    namespace=MemoryNamespace.SESSION,
+                    text=text,
+                    provenance=provenance,
+                    created_at_ms=now,
+                    session_id=session.session_id,
+                ),
+            )
+        window = self.settings.memory.summarize_after_turns
+        if store.turn_count(state.principal, session.session_id) > window:
+            await store.summarize(state.principal, session.session_id)
+
+    async def remember(
+        self, principal: Principal, text: str, *, salience: float = 0.6
+    ) -> MemoryItem:
+        """Store a fact the user asserted, in long-term memory.
+
+        The only way anything reaches long-term memory. Model output is never promoted here: a
+        hallucination stored as a user fact would outlive every session and could never be
+        told apart from something the user actually said.
+        """
+        from prag.core.errors import MemoryWriteRefused
+        from prag.core.ids import new_id
+        from prag.core.models.common import MemoryNamespace, Provenance
+        from prag.core.models.memory import MemoryItem
+
+        if self.long_term_memory is None:
+            raise MemoryWriteRefused("long-term memory is disabled")
+        item = MemoryItem(
+            item_id=new_id("mem"),
+            namespace=MemoryNamespace.LONG_TERM,
+            text=text,
+            provenance=Provenance.USER_ASSERTED,
+            created_at_ms=int(time.time() * 1000),
+            salience=salience,
+        )
+        await self.long_term_memory.write(principal, item)
+        return item
+
+    async def forget(self, principal: Principal, selector: MemorySelector) -> int:
+        """Erase matching memory from every tier, returning the count for the audit record."""
+        counts = [
+            await store.forget(principal, selector)
+            for store in (self.session_memory, self.long_term_memory)
+            if store is not None
+        ]
+        return sum(counts)
 
     async def _apply_adapter_decisions(self) -> None:
         """Act on the conflict monitor: demote critical adapters, queue stale ones for retraining.
@@ -355,7 +454,12 @@ class Platform:
                 metadata={
                     "evidence_markers": tuple(g.citation_marker for g in bundle.evidence)
                     if bundle
-                    else ()
+                    else (),
+                    "memory_markers": tuple(
+                        i.citation_marker for i in bundle.memory_items if i.citation_marker
+                    )
+                    if bundle
+                    else (),
                 },
             )
         )
@@ -506,6 +610,18 @@ def build_platform(
     parametric = (
         _build_parametric(settings, embedder) if settings.parametric.enabled else None
     )
+    memory_config = settings.memory
+    session_memory = PrincipalMemoryStore.session(
+        ttl_hours=memory_config.session_ttl_hours, window=memory_config.summarize_after_turns
+    )
+    long_term_memory = (
+        PrincipalMemoryStore.long_term(
+            max_items=memory_config.long_term_max_items,
+            decay_half_life_days=memory_config.salience_decay_half_life_days,
+        )
+        if memory_config.long_term_enabled
+        else None
+    )
     fusion = TablePolicy(
         weights=settings.fusion.weights,
         parametric_authority=settings.fusion.parametric_authority,
@@ -541,7 +657,12 @@ def build_platform(
             screen=guardrails.screen,
             wall_ms=settings.retrieval.wall_ms,
         ),
-        "build_context": BuildContextNode(builder, router, fusion=fusion),
+        "build_context": BuildContextNode(
+            builder,
+            router,
+            fusion=fusion,
+            memory=tuple(s for s in (session_memory, long_term_memory) if s is not None),
+        ),
         "generate": GenerateNode(
             LocalExtractiveProvider(),
             verifier,
@@ -574,6 +695,8 @@ def build_platform(
         lexical_index=lexical_index,
         guardrails=guardrails,
         parametric=parametric,
+        session_memory=session_memory,
+        long_term_memory=long_term_memory,
     )
     if parametric is not None:
         platform.events.subscribe(parametric.monitor.observe)

@@ -32,8 +32,14 @@ class InMemoryMemoryStore:
         # other's memory, which is a leak that a single-tenant test would never surface.
         return (principal.tenant_id, principal.user_id)
 
-    async def read(self, principal: Principal, query: str, limit: int) -> Sequence[MemoryItem]:
-        items = self._items.get(self._key(principal), [])
+    async def read(
+        self, principal: Principal, query: str, limit: int, *, session_id: str | None = None
+    ) -> Sequence[MemoryItem]:
+        items = [
+            i
+            for i in self._items.get(self._key(principal), [])
+            if session_id is None or i.session_id == session_id
+        ]
         terms = {t for t in query.lower().split() if t}
         scored = [item for item in items if not terms or terms & set(item.text.lower().split())]
         scored.sort(key=lambda i: (i.salience, i.created_at_ms), reverse=True)
@@ -60,7 +66,7 @@ class InMemoryMemoryStore:
         self._items.setdefault(self._key(principal), []).append(item)
 
     async def summarize(self, principal: Principal, session_id: str) -> SessionSummary:
-        items = self._items.get(self._key(principal), [])
+        items = [i for i in self._items.get(self._key(principal), []) if i.session_id == session_id]
         text = " ".join(i.text for i in items)
         return SessionSummary(
             session_id=session_id,
@@ -105,12 +111,15 @@ def make_memory_item(
     namespace: MemoryNamespace = MemoryNamespace.SESSION,
     provenance: Provenance = Provenance.USER_ASSERTED,
     salience: float = 0.5,
+    session_id: str | None = None,
+    created_at_ms: int | None = None,
 ) -> MemoryItem:
     return MemoryItem(
-        item_id=derive_id("mem", text, str(namespace)),
+        item_id=derive_id("mem", text, str(namespace), session_id),
         namespace=namespace,
         text=text,
         provenance=provenance,
-        created_at_ms=int(time.time() * 1000),
+        created_at_ms=int(time.time() * 1000) if created_at_ms is None else created_at_ms,
         salience=salience,
+        session_id=session_id,
     )

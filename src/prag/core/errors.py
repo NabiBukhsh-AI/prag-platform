@@ -38,6 +38,7 @@ __all__ = [
     "GroundingFailed",
     "GuardrailBlocked",
     "IsolationViolation",
+    "MemoryWriteRefused",
     "ParametricError",
     "PragError",
     "ProviderUnavailable",
@@ -132,6 +133,17 @@ class ConfigurationError(PragError):
 # ---------------------------------------------------------------------------
 # Budget and time
 # ---------------------------------------------------------------------------
+
+
+class MemoryWriteRefused(PragError):
+    """A memory write broke the namespace or provenance rules.
+
+    Raised by the store rather than trusted to callers: model-generated content never persists
+    as a long-term user fact, and an item never lands in another namespace's store.
+    """
+
+    reason_code = "memory_write_refused"
+    severity = Severity.WARNING
 
 
 class DeadlineExceeded(PragError):

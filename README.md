@@ -53,7 +53,7 @@ Five decisions carry the design:
 build order was followed strictly: `core/` first and in full, then the contract suites, then
 storage with in-memory fakes, then the graph engine, then vertical slices one at a time.
 
-**866 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
+**908 tests passing**, ruff clean, all 7 dependency contracts enforced by `import-linter`, and the
 evaluation gate passing on the seed golden and adversarial sets. CI runs all of it on every push
 and pull request, and every step blocks.
 
@@ -164,8 +164,8 @@ are low, which is why the tests and comparison lower the coverage floor from 0.6
 | Independence correction | Done. Sources sharing a lineage root count once, at their strongest authority |
 | Conflict surfacing | Done. Source-versus-source conflicts are surfaced at comparable authority and resolved toward the stronger source otherwise; both appear in the envelope as structure, and the prose is generated from it |
 | Staleness | Done. Evidence older than the query's half-life carries a warning, or abstains in strict mode |
-| Memory tiers | Next |
-| Graph and SQL sources, multi-hop | After memory |
+| Memory tiers | Done. Session memory (TTL, a recent-turn window, rolling summaries with entities and decisions verbatim) and long-term memory (explicit user assertions only, relevance-ranked, salience that decays with age and disuse, eviction by value) — both keyed by tenant and user and gating their own writes. Memory enters context in its own region with `[M]` markers; the citation validator resolves each namespace only against itself; `POST /v1/memory` and `POST /v1/memory/forget` are the only ways in and out of long-term memory |
+| Graph and SQL sources, multi-hop | Next |
 
 Fusion also changed two behaviours for the better: an off-topic retrieval now abstains instead of
 answering with its nearest sentence, and a parametric answer the corpus independently supports is

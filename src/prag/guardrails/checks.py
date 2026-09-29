@@ -27,7 +27,7 @@ __all__ = [
     "PiiGuardrail",
 ]
 
-_MARKER = re.compile(r"\s?\[(E\d+)\]")
+_MARKER = re.compile(r"\s?\[([EM]\d+)\]")
 
 
 def _inspected(payload: GuardrailPayload) -> str:
@@ -163,7 +163,8 @@ class CitationValidationGuardrail:
     asserts a source said something the source was never shown to say. The claim stays and the
     marker goes, because the grounding verifier has already judged the claim on its own.
 
-    Expects ``metadata["evidence_markers"]``: the markers of the groups actually in context.
+    Expects ``metadata["evidence_markers"]`` and ``metadata["memory_markers"]``: the markers of
+    the evidence groups and memory items actually in context.
     """
 
     name = "citation_validation"
@@ -172,7 +173,12 @@ class CitationValidationGuardrail:
 
     async def check(self, payload: GuardrailPayload) -> GuardrailVerdict:
         answer = payload.answer or ""
-        valid = set(payload.metadata.get("evidence_markers", ()))
+        # Two namespaces, each resolved only against its own items: an evidence marker against
+        # the groups in context, a memory marker against the memory items in context. A marker
+        # that crosses the boundary resolves to nothing and is stripped.
+        valid = set(payload.metadata.get("evidence_markers", ())) | set(
+            payload.metadata.get("memory_markers", ())
+        )
         invalid = sorted({m for m in _MARKER.findall(answer) if m not in valid})
         if not invalid:
             return _allow(self.name, self.phase)

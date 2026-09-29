@@ -51,7 +51,20 @@ class MemoryStore(Protocol):
 
     namespace: MemoryNamespace
 
-    async def read(self, principal: Principal, query: str, limit: int) -> Sequence[MemoryItem]: ...
+    async def read(
+        self,
+        principal: Principal,
+        query: str,
+        limit: int,
+        *,
+        session_id: str | None = None,
+    ) -> Sequence[MemoryItem]:
+        """Items for this principal, best first, never another principal's.
+
+        ``session_id`` narrows session memory to one conversation. Keyed by tenant *and* user
+        always: tenant alone would let two users in one tenant read each other's memory.
+        """
+        ...
 
     async def write(self, principal: Principal, item: MemoryItem) -> None:
         """Persist an item.

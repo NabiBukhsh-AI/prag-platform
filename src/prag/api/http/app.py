@@ -51,6 +51,26 @@ class IngestRequest(BaseModel):
     authority: float = Field(default=0.8, ge=0.0, le=1.0)
 
 
+class RememberRequest(BaseModel):
+    """A fact the user asserts about themselves, for long-term memory.
+
+    The only way into long-term memory. There is no endpoint that stores an answer: model output
+    promoted to a user fact would outlive every session and could never be told apart from
+    something the user actually said.
+    """
+
+    text: str = Field(min_length=1, max_length=2_000)
+    salience: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+class ForgetRequest(BaseModel):
+    """What to erase. Every field narrows; an empty request erases nothing."""
+
+    item_ids: list[str] = Field(default_factory=list)
+    session_id: str | None = None
+    older_than_ms: int | None = None
+
+
 def build_app(platform: Platform) -> FastAPI:
     """Construct the ASGI app over an already-wired platform.
 
@@ -123,6 +143,38 @@ def build_app(platform: Platform) -> FastAPI:
         return PlainTextResponse(
             platform.metrics.render(), media_type="text/plain; version=0.0.4"
         )
+
+    @app.post("/v1/memory")
+    async def remember(body: RememberRequest, request: Request) -> Any:
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        try:
+            principal = resolve_principal(headers)
+            item = await platform.remember(principal, body.text, salience=body.salience)
+        except PragError as exc:
+            response = to_response(exc)
+            return JSONResponse(status_code=response.status, content=response.as_dict())
+        return JSONResponse(status_code=201, content={"item_id": item.item_id})
+
+    @app.post("/v1/memory/forget")
+    async def forget(body: ForgetRequest, request: Request) -> Any:
+        """Right to erasure. Returns the count, because erasure needs an auditable record."""
+        from prag.core.models.memory import MemorySelector
+
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        try:
+            principal = resolve_principal(headers)
+        except PragError as exc:
+            response = to_response(exc)
+            return JSONResponse(status_code=response.status, content=response.as_dict())
+        removed = await platform.forget(
+            principal,
+            MemorySelector(
+                item_ids=tuple(body.item_ids),
+                session_id=body.session_id,
+                older_than_ms=body.older_than_ms,
+            ),
+        )
+        return JSONResponse(status_code=200, content={"forgotten": removed})
 
     @app.post("/v1/ingest")
     async def ingest(body: IngestRequest, request: Request) -> Any:

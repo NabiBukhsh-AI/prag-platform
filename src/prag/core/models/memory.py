@@ -44,6 +44,9 @@ class MemoryItem(BaseModel):
     #: Citation marker within the memory namespace, kept separate from evidence markers so the
     #: two can never be confused for one another.
     citation_marker: str | None = None
+    #: The conversation a session item belongs to. ``None`` for long-term items, which outlive
+    #: every session, and for session items written without one.
+    session_id: str | None = None
 
     @property
     def persistable(self) -> bool:

@@ -34,8 +34,12 @@ from prag.core.models.query import QueryVariants
 from prag.core.models.state import NodeResult, NodeStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from prag.core.models.context import RenderedRegion
+    from prag.core.models.memory import MemoryItem
     from prag.core.models.state import RequestState
+    from prag.core.protocols.crosscutting import MemoryStore
     from prag.core.protocols.evidence import (
         ContextBuilder,
         EvidenceGrouper,
@@ -286,12 +290,16 @@ class BuildContextNode:
         router: ModelRouter,
         *,
         fusion: FusionPolicy | None = None,
+        memory: Sequence[MemoryStore] = (),
+        memory_limit: int = 5,
     ) -> None:
         self._builder = builder
         self._router = router
         # Optional so the node still works in graphs assembled before fusion existed; the
         # platform always injects one.
         self._fusion = fusion
+        self._memory = tuple(memory)
+        self._memory_limit = memory_limit
 
     async def run(self, state: RequestState) -> NodeResult:
         from prag.core.models.parametric import AdapterSet
@@ -331,9 +339,12 @@ class BuildContextNode:
         spec = self._router.select(
             state.analysis, decision, AdapterSet(), state.budget, state.policy
         )
-        # Memory is empty until the memory tier lands in Phase 5. Passing an empty sequence
-        # is honest; a stub accessor would imply a tier that does not exist yet.
-        bundle = await self._builder.build(state.analysis, state.evidence, [], spec, state.budget)
+        # Memory goes to the builder as memory, never as evidence: it lands in its own region
+        # with its own markers, and nothing downstream can bind an evidence citation to it.
+        memory = await self._recall(state)
+        bundle = await self._builder.build(
+            state.analysis, state.evidence, memory, spec, state.budget
+        )
 
         if self._fusion is not None:
             # The policy table decides over what actually made it into context. Its two
@@ -365,6 +376,35 @@ class BuildContextNode:
             node_id=self.node_id,
             status=NodeStatus.OK,
             state=state.advanced(bundle=bundle, spec=spec, decision=decision),
+        )
+
+
+    async def _recall(self, state: RequestState) -> tuple[MemoryItem, ...]:
+        """Session memory for this conversation, then long-term facts about this user.
+
+        Marked ``M1``, ``M2``... in their own namespace. Memory never substitutes for evidence:
+        a query with nothing retrieved has already abstained above, whatever memory holds.
+        """
+        from prag.core.models.common import MemoryNamespace
+
+        assert state.analysis is not None
+        session_id = state.session.session_id if state.session is not None else None
+        found: list[MemoryItem] = []
+        for store in self._memory:
+            is_session = store.namespace is MemoryNamespace.SESSION
+            if is_session and session_id is None:
+                continue
+            found.extend(
+                await store.read(
+                    state.principal,
+                    state.analysis.normalized_query,
+                    self._memory_limit,
+                    session_id=session_id if is_session else None,
+                )
+            )
+        return tuple(
+            item.model_copy(update={"citation_marker": f"M{index}"})
+            for index, item in enumerate(found, start=1)
         )
 
 
